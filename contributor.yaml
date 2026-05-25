@@ -1,0 +1,15 @@
+name: "Marketplace"
+author: "Xcore team's"
+email: "contact@xcorehub.dev"
+github: "https://github.com/xcore-team/marketplace"
+license: "MIT"
+contributors:
+  - name: "xcore team"
+    role: "Maintainer"
+    email: "contact@xcorehub.dev
+    github: "xcore-team"
+
+  - name: traoreera
+    role: review
+    email: "eliezer@xcorehub.dev
+    github: "traoreera"

@@ -1,0 +1,36 @@
+site_name: XAuth Documentation
+site_description: Plugin d'authentification enterprise pour xcore
+repo_url: https://github.com/traoreera/xauth
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: indigo
+    accent: blue
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+
+nav:
+  - Accueil: ../README.md
+  - Configuration: configuration.md
+  - Flux de connexion: flows.md
+  - API:
+      - Authentification & Sessions: api/authentication.md
+      - MFA: security/mfa.md
+      - OAuth 2.0: api/oauth.md
+      - RBAC: api/rbac.md
+      - Tenants: api/tenants.md
+      - Administration: api/admin.md
+      - Invitations: api/invites.md
+      - Audit: api/audit.md
+  - Sécurité:
+      - Tokens JWT & Blacklist: security/tokens.md
+      - Rate Limiting: security/rate-limiting.md
+      - Audit Log: security/audit.md
+  - IPC Inter-plugins: ipc.md
+  - Guide d'intégration xcore: ../integration.md

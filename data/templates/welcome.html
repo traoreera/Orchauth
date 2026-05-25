@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="fr" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>Bienvenue sur {{ app_name }}</title>
+  <!--[if mso]>
+  <noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
+  <![endif]-->
+</head>
+<body style="margin:0;padding:0;background-color:#050B18;font-family:'Courier New',Courier,monospace;">
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#050B18;">
+    <tr>
+      <td align="center" style="padding:40px 16px;">
+
+        <!-- Card -->
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#0F172A;padding:0;border-top:3px solid #3B82F6;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="padding:32px 40px 28px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="border-left:3px solid #3B82F6;padding-left:14px;">
+                          <div style="font-family:'Courier New',Courier,monospace;font-size:22px;font-weight:700;color:#F8FAFC;letter-spacing:0.12em;text-transform:uppercase;">{{ app_name }}</div>
+                          <div style="font-family:Georgia,'Times New Roman',serif;font-size:11px;color:#64748B;letter-spacing:0.2em;text-transform:uppercase;margin-top:3px;">Authentification &amp; Accès</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="background-color:#1E293B;height:1px;font-size:0;line-height:0;">&nbsp;</td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="background-color:#1E293B;padding:48px 40px 40px;">
+
+              <!-- Label -->
+              <table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+                <tr>
+                  <td style="background-color:#172554;border:1px solid #1D4ED8;border-radius:3px;padding:5px 12px;">
+                    <span style="font-family:'Courier New',Courier,monospace;font-size:10px;color:#93C5FD;letter-spacing:0.25em;text-transform:uppercase;">COMPTE ACTIVÉ</span>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Heading -->
+              <h1 style="font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:400;color:#F8FAFC;margin:0 0 12px;line-height:1.2;letter-spacing:-0.01em;">Bienvenue,<br><span style="color:#3B82F6;">{{ username }}</span></h1>
+
+              <p style="font-family:Georgia,'Times New Roman',serif;font-size:16px;color:#94A3B8;margin:0 0 36px;line-height:1.7;">Votre compte est prêt. Vous avez maintenant accès à l'ensemble des fonctionnalités de la plateforme.</p>
+
+              <!-- Separator line -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:36px;">
+                <tr>
+                  <td style="border-top:1px solid #334155;font-size:0;line-height:0;">&nbsp;</td>
+                </tr>
+              </table>
+
+              <!-- Features list -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:40px;">
+                <tr>
+                  <td style="padding:14px 16px;background-color:#0F172A;border-left:2px solid #3B82F6;margin-bottom:8px;">
+                    <span style="font-family:'Courier New',Courier,monospace;font-size:12px;color:#64748B;letter-spacing:0.1em;">01 /</span>
+                    <span style="font-family:Georgia,'Times New Roman',serif;font-size:14px;color:#CBD5E1;margin-left:10px;">Authentification multi-facteurs disponible</span>
+                  </td>
+                </tr>
+                <tr><td style="height:6px;"></td></tr>
+                <tr>
+                  <td style="padding:14px 16px;background-color:#0F172A;border-left:2px solid #1E40AF;">
+                    <span style="font-family:'Courier New',Courier,monospace;font-size:12px;color:#64748B;letter-spacing:0.1em;">02 /</span>
+                    <span style="font-family:Georgia,'Times New Roman',serif;font-size:14px;color:#CBD5E1;margin-left:10px;">Accès basé sur les rôles (RBAC)</span>
+                  </td>
+                </tr>
+                <tr><td style="height:6px;"></td></tr>
+                <tr>
+                  <td style="padding:14px 16px;background-color:#0F172A;border-left:2px solid #1E3A8A;">
+                    <span style="font-family:'Courier New',Courier,monospace;font-size:12px;color:#64748B;letter-spacing:0.1em;">03 /</span>
+                    <span style="font-family:Georgia,'Times New Roman',serif;font-size:14px;color:#CBD5E1;margin-left:10px;">Journal d'audit complet</span>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA -->
+              <table role="presentation" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="background-color:#3B82F6;border-radius:3px;">
+                    <a href="{{ login_url }}" style="display:inline-block;font-family:'Courier New',Courier,monospace;font-size:13px;font-weight:700;color:#FFFFFF;text-decoration:none;padding:14px 32px;letter-spacing:0.15em;text-transform:uppercase;">Accéder à mon compte</a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="font-family:'Courier New',Courier,monospace;font-size:11px;color:#475569;margin:24px 0 0;letter-spacing:0.05em;">
+                Ou copiez ce lien : <span style="color:#3B82F6;">{{ login_url }}</span>
+              </p>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#0F172A;padding:24px 40px;border-top:1px solid #1E293B;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <p style="font-family:'Courier New',Courier,monospace;font-size:11px;color:#334155;margin:0;letter-spacing:0.08em;">&copy; {{ app_name }} &mdash; Tous droits réservés</p>
+                  </td>
+                  <td align="right">
+                    <p style="font-family:'Courier New',Courier,monospace;font-size:10px;color:#1E3A8A;margin:0;letter-spacing:0.1em;text-transform:uppercase;">SECURE &bull; ENTERPRISE</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+        </table>
+        <!-- /Card -->
+
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>

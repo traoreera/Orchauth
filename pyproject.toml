@@ -1,0 +1,14 @@
+[project]
+name = "xauth"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic[email]>=2.13.4",
+    "python-jose>=3.5.0",
+    "xcore",
+]
+
+[tool.uv.sources]
+xcore = { git = "https://www.github.com/traoreera/xcore.git" }
