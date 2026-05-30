@@ -34,6 +34,8 @@ class TokenService:
         self,
         user_id: str,
         tenant_id: Optional[str] = None,
+        email: Optional[str] = None,
+        roles: Optional[list[str]] = None,
         extra: Optional[dict[str, Any]] = None,
     ) -> tuple[str, str]:
         now = datetime.now(tz=timezone.utc)
@@ -47,6 +49,10 @@ class TokenService:
         }
         if tenant_id:
             payload["tenant_id"] = tenant_id
+        if email:
+            payload["email"] = email
+        if roles:
+            payload["roles"] = roles
         if extra:
             payload.update(extra)
         token = jwt.encode(payload, self._private_key, algorithm=ALGORITHM)

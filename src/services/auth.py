@@ -336,21 +336,15 @@ class AuthService:
         refresh_token_hashed = self._token.hash_token(refresh_token_plain)
         session_repo = SessionRepository(self._session)
 
-        # Si MFA activé → pas d'access token, on attend la vérification TOTP
+        # Si MFA activé → émettre un challenge token court (5 min), pas de session réelle
         if user.mfa_enabled:
-            session = Session(
-                user_id=user.id,
-                tenant_id=tenant_id,
-                refresh_token=refresh_token_hashed,
-                device_fingerprint=device_fingerprint,
-                ip_address=ip_address,
-                expires_at=datetime.now(tz=timezone.utc)
-                + timedelta(days=self._token._refresh_expire),
+            mfa_token = self._token.create_mfa_challenge_token(
+                user_id=user.id, tenant_id=tenant_id
             )
-            await session_repo.save(session)
             return {
                 "access_token": "",
-                "refresh_token": refresh_token_plain,
+                "refresh_token": "",
+                "mfa_token": mfa_token,
                 "token_type": "bearer",
                 "user_id": user.id,
                 "tenant_id": tenant_id,
@@ -359,7 +353,7 @@ class AuthService:
             }
 
         access_token, jti = self._token.create_access_token(
-            user_id=user.id, tenant_id=tenant_id
+            user_id=user.id, tenant_id=tenant_id, email=user.email
         )
 
         session = Session(
@@ -429,13 +423,29 @@ class AuthService:
         if membership is None:
             raise ValueError("User is not a member of this tenant")
 
-        # Mise à jour de la session avec le tenant choisi
+        # Rotation du refresh token + access token scopé au tenant
         access_token, jti = self._token.create_access_token(
             user_id=session.user_id, tenant_id=tenant_id
         )
-        session.tenant_id = tenant_id
-        session.last_jti = jti
+
+        new_refresh_plain = self._token.create_refresh_token()
+        new_refresh_hashed = self._token.hash_token(new_refresh_plain)
+
+        session.is_revoked = True
         await self._session.flush()
+
+        new_session = Session(
+            user_id=session.user_id,
+            tenant_id=tenant_id,
+            refresh_token=new_refresh_hashed,
+            device_fingerprint=session.device_fingerprint,
+            ip_address=ip_address or session.ip_address,
+            expires_at=datetime.now(tz=timezone.utc)
+            + timedelta(days=self._token._refresh_expire),
+            last_jti=jti,
+        )
+        session_repo = SessionRepository(self._session)
+        await session_repo.save(new_session)
 
         if self._events:
             await self._events.user_login(
@@ -447,7 +457,7 @@ class AuthService:
 
         return {
             "access_token": access_token,
-            "refresh_token": refresh_token,  # pas de rotation ici
+            "refresh_token": new_refresh_plain,
             "token_type": "bearer",
             "user_id": session.user_id,
             "tenant_id": tenant_id,
@@ -457,49 +467,55 @@ class AuthService:
 
     async def verify_mfa_and_issue_token(
         self,
-        refresh_token: str,
+        mfa_token: str,
         totp_code: str,
         ip_address: Optional[str] = None,
+        device_fingerprint: Optional[str] = None,
     ) -> dict[str, Any]:
         """
-        Vérifie le code TOTP (ou backup code) après un login avec MFA activé.
-        Émet l'access token uniquement si le code est valide.
+        Deuxième étape du login MFA.
+        Vérifie le challenge JWT (5 min) + code TOTP, puis crée la session réelle.
         """
-        hashed = self._token.hash_token(refresh_token)
-        session_repo = SessionRepository(self._session)
-        session = await session_repo.get_by_refresh_token(hashed)
+        try:
+            claims = self._token.verify_mfa_challenge_token(mfa_token)
+        except ValueError as exc:
+            raise ValueError(f"Challenge MFA invalide : {exc}") from exc
 
-        if session is None:
-            raise ValueError("Invalid or expired refresh token")
-
-        now = datetime.now(tz=timezone.utc)
-        expires = session.expires_at
-        if expires.tzinfo is None:
-            expires = expires.replace(tzinfo=timezone.utc)
-        if expires < now:
-            session.is_revoked = True
-            await self._session.flush()
-            raise ValueError("Refresh token expired")
+        user_id = claims["sub"]
+        tenant_id = claims.get("tenant_id")
 
         from .mfa import MFAService
 
         mfa_svc = MFAService(self._session)
-        valid = await mfa_svc.verify_totp(session.user_id, totp_code)
+        valid = await mfa_svc.verify_totp(user_id, totp_code)
         if not valid:
-            raise ValueError("Invalid MFA code")
+            raise ValueError("Code MFA invalide ou expiré")
 
+        refresh_plain = self._token.create_refresh_token()
+        refresh_hashed = self._token.hash_token(refresh_plain)
         access_token, jti = self._token.create_access_token(
-            user_id=session.user_id, tenant_id=session.tenant_id
+            user_id=user_id, tenant_id=tenant_id
         )
-        session.last_jti = jti
-        await self._session.flush()
+
+        session = Session(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            refresh_token=refresh_hashed,
+            device_fingerprint=device_fingerprint,
+            ip_address=ip_address,
+            expires_at=datetime.now(tz=timezone.utc)
+            + timedelta(days=self._token._refresh_expire),
+            last_jti=jti,
+        )
+        session_repo = SessionRepository(self._session)
+        await session_repo.save(session)
 
         return {
             "access_token": access_token,
-            "refresh_token": refresh_token,
+            "refresh_token": refresh_plain,
             "token_type": "bearer",
-            "user_id": session.user_id,
-            "tenant_id": session.tenant_id,
+            "user_id": user_id,
+            "tenant_id": tenant_id,
             "mfa_required": False,
             "tenants": None,
         }

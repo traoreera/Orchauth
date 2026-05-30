@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -30,8 +29,10 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     mfa_secret: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    mfa_backup_codes: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)  # JSON list of hashed codes
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    mfa_backup_codes: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    created_at: Mapped[Optional[str]] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
+    )
 
     __table_args__ = (Index("ix_xauth_user_email", "email"),)
 

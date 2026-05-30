@@ -24,7 +24,7 @@ class SessionResponse(BaseModel):
 
 
 class VerifyMFARequest(BaseModel):
-    refresh_token: str
+    mfa_token: str
     code: str
 
 
@@ -41,14 +41,15 @@ def sessions_router(db: Any, token_service: TokenService, cache: Any = None) -> 
     async def verify_mfa(body: VerifyMFARequest, request: Request) -> Any:
         """
         Deuxième étape du login MFA.
-        Soumet le code TOTP (ou backup code) pour obtenir l'access token.
+        Vérifie le challenge JWT (mfa_token, 5 min) + code TOTP.
+        Crée la session réelle et retourne les tokens définitifs.
         """
         ip = _extract_ip(request)
         async with db.session() as session:
             svc = AuthService(session, token_service, cache=cache)
             try:
                 result = await svc.verify_mfa_and_issue_token(
-                    refresh_token=body.refresh_token,
+                    mfa_token=body.mfa_token,
                     totp_code=body.code,
                     ip_address=ip,
                 )

@@ -61,8 +61,9 @@ class TokenResponse(BaseModel):
     user_id: Optional[str] = None
     tenant_id: Optional[str] = None
     mfa_required: bool = False
-    onboarding_required: bool = False  # ← true si l'user n'appartient à aucun tenant
-    tenants: Optional[list[TenantInfo]] = None  # ← présent uniquement si multi-tenant
+    mfa_token: Optional[str] = None        # challenge JWT court (5 min) si mfa_required=true
+    onboarding_required: bool = False
+    tenants: Optional[list[TenantInfo]] = None
 
 
 class UserResponse(BaseModel):

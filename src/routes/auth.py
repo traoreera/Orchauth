@@ -4,13 +4,15 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from ..repositories.user import UserRepository
 from ..schemas.auth import (
     LoginRequest,
     LogoutRequest,
     RefreshRequest,
     RegisterRequest,
+    SelectTenantRequest,
     TokenResponse,
-    UserResponse,SelectTenantRequest
+    UserResponse,
 )
 from ..services.auth import AuthService
 from ..services.token import TokenService
@@ -21,7 +23,7 @@ def _extract_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def auth_router(auth_service: AuthService, token_service: TokenService) -> APIRouter:
+def auth_router(auth_service: AuthService, token_service: TokenService, db: Any = None) -> APIRouter:
     router = APIRouter(tags=["auth"])
 
     @router.post(
@@ -77,12 +79,23 @@ def auth_router(auth_service: AuthService, token_service: TokenService) -> APIRo
         except ValueError as exc:
             raise HTTPException(status_code=401, detail=str(exc))
 
-        from ..repositories.user import UserRepository
+        user_id = claims["sub"]
 
-        # We can't easily get the session here without DI, so return claims
-        # In a real setup you'd inject the session; for now return from claims
+        if db is not None:
+            async with db.session() as session:
+                user = await UserRepository(session).get(user_id)
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+            return {
+                "id": user.id,
+                "email": user.email,
+                "is_active": user.is_active,
+                "mfa_enabled": user.mfa_enabled,
+            }
+
+        # fallback si db non injecté — utilise les claims du JWT
         return {
-            "id": claims["sub"],
+            "id": user_id,
             "email": claims.get("email", ""),
             "is_active": True,
             "mfa_enabled": False,
