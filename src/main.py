@@ -45,6 +45,7 @@ from .schemas.auth import (
 from .services.auth import AuthService
 from .services.email import AuthEmailService
 from .services.events import XAuthEvents
+from .services.rbac import RBACService
 from .services.seed import run_seed
 from .services.token import TokenService
 
@@ -175,6 +176,39 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
         from .services.seed import run_seed
 
         await run_seed(db, cfg=_build_seed_cfg(cfg.get("seed", {}), env))
+
+        # ── Agrégation RBAC : écoute les déclarations des plugins ────────────
+        # Garanti par `requires: auth` côté plugins → l'auth (et donc ces
+        # listeners) est up avant qu'un plugin RBAC n'émette `rbac.declare`.
+        self._register_rbac_listeners()
+
+    def _register_rbac_listeners(self) -> None:
+        events = self.ctx.events  # type: ignore
+        db = self._db
+        cache = self._cache
+
+        @events.on("rbac.declare")
+        async def _on_rbac_declare(event):
+            data = event.data or {}
+            plugin = data.get("plugin")
+            if not plugin:
+                return
+            async with db.session() as session:
+                svc = RBACService(session, cache=cache)
+                await svc.reconcile_plugin_grants(plugin, data.get("grants", []))
+                await session.commit()
+
+        @events.on("plugin.*.unloaded")
+        async def _on_plugin_unloaded(event):
+            # event.name = "plugin.<name>.unloaded"
+            parts = (event.name or "").split(".")
+            if len(parts) < 3:
+                return
+            plugin = parts[1]
+            async with db.session() as session:
+                svc = RBACService(session, cache=cache)
+                await svc.disable_plugin(plugin)
+                await session.commit()
 
     async def on_unload(self) -> None:
         unregister_auth_backend()
@@ -346,9 +380,16 @@ def _auth_router_with_db(
                     ip_address=ip,
                 )
                 await session.commit()
-                return result
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
+
+        # Emission APRÈS commit (hors du `async with session`) pour éviter
+        # que le handler xlicense ne bute sur un verrou DB (sqlite single-writer)
+        if events and result.get("tenant_id"):
+            await events.tenant_created(
+                result["tenant_id"], result["user_id"], body.slug
+            )
+        return result
 
     @router.post("/setup/join", response_model=TokenResponse)
     async def setup_join(body: SetupJoinRequest, request: Request):

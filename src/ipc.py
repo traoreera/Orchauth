@@ -14,7 +14,6 @@ HAS_PERMISSION_SCHEMA: TypedDict = {# type: ignore
     "user_id": (str, ...),
     "tenant_id": (str, ...),
     "permission": (str, ...),
-    "tennand_id": (str, ...),
 }
 
 GET_USER_SCHEMA: TypedDict = {# type: ignore
@@ -23,6 +22,12 @@ GET_USER_SCHEMA: TypedDict = {# type: ignore
 
 GET_TENANT_SCHEMA: TypedDict = {# type: ignore
     "tenant_id": (str, ...),
+}
+
+TENANT_ACCESS_SCHEMA: TypedDict = {# type: ignore
+    "user_id": (str, ...),
+    "tenant_id": (str, ...),
+    "permissions": (list, None),
 }
 
 CREATE_INVITE_SCHEMA: TypedDict = {# type: ignore
@@ -136,6 +141,37 @@ class IPCCommands(AutoDispatchMixin):
                         "slug": tenant.slug,
                     }
                 )
+        except Exception as exc:
+            return error(str(exc), code="error")
+
+    @action("xauth.tenant_access")
+    @validate_payload(TENANT_ACCESS_SCHEMA, type_response="model", unset=False) # type: ignore
+    async def _ipc_tenant_access(self, payload) -> dict:
+        """
+        Résout l'accès d'un user à un tenant pour les plugins tiers (xlicense…).
+
+        Retour :
+            has_access  → l'utilisateur est membre du tenant
+            can_manage  → l'utilisateur peut gérer les ressources du tenant
+                          (owner du tenant, perm de gestion, ou admin plateforme)
+        """
+        try:
+            perms = getattr(payload, "permissions", None) or []
+            if "admin:*" in perms:
+                return ok(has_access=True, can_manage=True)
+            async with self._db.session() as session: # type: ignore
+                from .repositories.user import TenantMemberRepository
+
+                member_repo = TenantMemberRepository(session)
+                membership = await member_repo.get_membership(
+                    payload.user_id, payload.tenant_id
+                )
+                if membership is None:
+                    return ok(has_access=False, can_manage=False)
+                can_manage = bool(membership.is_owner) or any(
+                    p in perms for p in ("license:write", "license:manage")
+                )
+                return ok(has_access=True, can_manage=can_manage)
         except Exception as exc:
             return error(str(exc), code="error")
 

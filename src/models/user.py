@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
+from datetime import datetime
 from .base import Base
 
 if TYPE_CHECKING:

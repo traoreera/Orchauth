@@ -17,11 +17,25 @@ from ..schemas.tenant import (
 
 
 from ..services.events import XAuthEvents
+from ..services.audit import AuditService
 from ..models.user import TenantMember
 from ..repositories.rbac import RoleRepository
+from ._scope import payload_field as _payload_field, require_tenant_scope
+
 
 def tenants_router(db: Any, events: XAuthEvents | None = None) -> APIRouter:
     router = APIRouter(prefix="/tenants", tags=["tenants"])
+
+    async def _require_tenant_scope(
+        session: Any,
+        payload: AuthPayload,
+        tenant_id: str,
+        *,
+        owner_only: bool = False,
+    ) -> Any:
+        return await require_tenant_scope(
+            session, payload, tenant_id, owner_only=owner_only
+        )
 
     @router.post(
         "/",
@@ -47,15 +61,16 @@ def tenants_router(db: Any, events: XAuthEvents | None = None) -> APIRouter:
             await repo.save(tenant)
             await session.flush()
 
-            # Assigner l'owner
+            # Assigner l'owner — rôle 'tenant_admin' (gestion de son tenant),
+            # jamais le rôle 'admin' plateforme (admin:*).
             role_repo = RoleRepository(session)
             roles = await role_repo.list_for_tenant(None)
-            admin_role = next((r for r in roles if r.name == "admin"), None)
+            owner_role = next((r for r in roles if r.name == "tenant_admin"), None)
 
             member = TenantMember(
                 user_id=user_id,
                 tenant_id=tenant.id,
-                role_id=admin_role.id if admin_role else None,
+                role_id=owner_role.id if owner_role else None,
                 is_owner=True
             )
             session.add(member)
@@ -112,9 +127,11 @@ def tenants_router(db: Any, events: XAuthEvents | None = None) -> APIRouter:
     async def update_tenant(
         tenant_id: str,
         body: TenantUpdate,
-        _: AuthPayload = Depends(require_permission("tenants:write")),
+        payload: AuthPayload = Depends(get_current_user),
     ) -> Any:
         async with db.session() as session:
+            # Owner de CE tenant (ou admin plateforme) uniquement.
+            await _require_tenant_scope(session, payload, tenant_id, owner_only=True)
             repo = TenantRepository(session)
             tenant = await repo.get(tenant_id)
             if tenant is None:
@@ -144,10 +161,49 @@ def tenants_router(db: Any, events: XAuthEvents | None = None) -> APIRouter:
     @router.get("/{tenant_id}/members", response_model=List[MemberResponse])
     async def list_members(
         tenant_id: str,
-        _: AuthPayload = Depends(require_permission("tenants:read")),
+        payload: AuthPayload = Depends(get_current_user),
     ) -> Any:
         async with db.session() as session:
+            # Tout membre du tenant peut lister les membres (ou admin plateforme).
+            await _require_tenant_scope(session, payload, tenant_id)
             repo = TenantMemberRepository(session)
             return await repo.get_members_of_tenant(tenant_id)
+
+    @router.delete(
+        "/{tenant_id}/members/{user_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def remove_member(
+        tenant_id: str,
+        user_id: str,
+        payload: AuthPayload = Depends(get_current_user),
+    ) -> None:
+        """Retire un membre du tenant. Réservé au propriétaire du tenant."""
+        async with db.session() as session:
+            await _require_tenant_scope(
+                session, payload, tenant_id, owner_only=True
+            )
+            repo = TenantMemberRepository(session)
+            target = await repo.get_membership(user_id, tenant_id)
+            if target is None:
+                raise HTTPException(
+                    status_code=404, detail="Membre introuvable dans ce tenant"
+                )
+            if target.is_owner:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Impossible de retirer le propriétaire du tenant",
+                )
+            await repo.delete(target)
+
+            audit = AuditService(session)
+            await audit.log_event(
+                action="tenant.member_removed",
+                user_id=_payload_field(payload, "sub"),
+                tenant_id=tenant_id,
+                resource="tenant_member",
+                resource_id=user_id,
+            )
+            await session.commit()
 
     return router

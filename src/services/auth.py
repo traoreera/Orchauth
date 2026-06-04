@@ -70,6 +70,7 @@ class AuthService:
         cache: Any = None,
         user_role_name: str = "user",
         admin_role_name: str = "admin",
+        owner_role_name: str = "tenant_admin",
     ) -> None:
         self._session = session
         self._token = token_service
@@ -77,6 +78,7 @@ class AuthService:
         self._cache = cache
         self._user_role_name = user_role_name
         self._admin_role_name = admin_role_name
+        self._owner_role_name = owner_role_name
 
     async def register(
         self,
@@ -565,13 +567,15 @@ class AuthService:
 
         role_repo = RoleRepository(self._session)
         global_roles = await role_repo.list_for_tenant(None)
-        admin_role = next(
-            (r for r in global_roles if r.name == self._admin_role_name), None
+        # Le propriétaire reçoit le rôle 'tenant_admin' (gestion de SON tenant),
+        # surtout pas le rôle 'admin' plateforme (admin:* = god-mode global).
+        owner_role = next(
+            (r for r in global_roles if r.name == self._owner_role_name), None
         )
-        if admin_role is None:
+        if owner_role is None:
             _logger.warning(
-                "[xauth] Rôle admin '%s' introuvable — owner créé sans rôle pour le tenant %s",
-                self._admin_role_name,
+                "[xauth] Rôle '%s' introuvable — owner créé sans rôle pour le tenant %s",
+                self._owner_role_name,
                 slug,
             )
 
@@ -579,7 +583,7 @@ class AuthService:
         membership = TenantMember(
             user_id=session.user_id,
             tenant_id=tenant.id,
-            role_id=admin_role.id if admin_role else None,
+            role_id=owner_role.id if owner_role else None,
             is_owner=True,
         )
         await member_repo.save(membership)

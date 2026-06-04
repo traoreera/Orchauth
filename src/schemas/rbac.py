@@ -21,10 +21,24 @@ class AssignRoleRequest(BaseModel):
     role_id: str
 
 
+class GrantMemberPermissionRequest(BaseModel):
+    permission_name: str
+
+
+class CreateTenantRoleRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    permissions: List[str] = []
+
+
 class PermissionResponse(BaseModel):
     id: str
     name: str
     description: Optional[str]
+    source_plugin: Optional[str] = None
+    tenant_grantable: bool = False
+    group: Optional[str] = None
+    active: bool = True
 
     class Config:
         from_attributes = True

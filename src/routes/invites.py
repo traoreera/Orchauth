@@ -9,7 +9,9 @@ from xcore.sdk import require_permission
 from ..services.email import AuthEmailService
 from ..services.events import XAuthEvents
 from ..services.invite import InviteService
+from ..repositories.rbac import RoleRepository
 from ..schemas.invite import AcceptInviteRequest, InviteCreate, InviteResponse
+from ._scope import is_platform_admin, require_tenant_scope
 
 
 def invites_router(
@@ -25,6 +27,22 @@ def invites_router(
         user: AuthPayload = Depends(require_permission("invites:write")),
     ) -> Any:
         async with db.session() as session:
+            # L'appelant doit être owner du tenant ciblé (ou admin plateforme) :
+            # empêche d'inviter sur le tenant d'autrui.
+            await require_tenant_scope(session, user, body.tenant_id, owner_only=True)
+
+            # Anti-escalade : un owner ne peut pas attribuer un rôle portant
+            # admin:* (god-mode plateforme). Seul l'admin plateforme le peut.
+            if body.role_id and not is_platform_admin(user):
+                role = await RoleRepository(session).get_with_permissions(body.role_id)
+                if role is None:
+                    raise HTTPException(status_code=400, detail="Rôle invalide")
+                if any(p.name == "admin:*" for p in role.permissions):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Attribution d'un rôle administrateur plateforme interdite",
+                    )
+
             svc = InviteService(session, events)
             try:
                 invite = await svc.create_invite(
@@ -53,9 +71,11 @@ def invites_router(
     @router.get("/{tenant_id}", response_model=List[InviteResponse])
     async def list_invites(
         tenant_id: str,
-        _: AuthPayload = Depends(require_permission("invites:read")),
+        user: AuthPayload = Depends(require_permission("invites:read")),
     ) -> Any:
         async with db.session() as session:
+            # Lecture limitée aux invitations de SON tenant (ou admin plateforme).
+            await require_tenant_scope(session, user, tenant_id)
             svc = InviteService(session)
             return await svc.list_invites(tenant_id)
 

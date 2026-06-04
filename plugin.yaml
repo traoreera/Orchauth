@@ -67,7 +67,6 @@ env:
   APP_BASE_URL: "${XAUTH_APP_BASE_URL}"
   APP_NAME: "${XAUTH_APP_NAME}"
 
-
   # OAuth providers — secrets, toujours via env
   OAUTH_GOOGLE_CLIENT_ID: "${XAUTH_OAUTH_GOOGLE_CLIENT_ID}"
   OAUTH_GOOGLE_CLIENT_SECRET: "${XAUTH_OAUTH_GOOGLE_CLIENT_SECRET}"
@@ -81,6 +80,9 @@ env:
 # ── Permissions inter-plugins ─────────────────────────────────────────────────
 permissions:
   - resource: "registry"
+    actions: ["*"]
+    effect: allow
+  - resource: "xauth.*"
     actions: ["*"]
     effect: allow
 

@@ -19,60 +19,63 @@ logger = logging.getLogger("xauth.seed")
 
 PERMISSIONS: list[tuple[str, str]] = [
     # Plugins
-    ("plugin:list",    "Lister les plugins"),
-    ("plugin:read",    "Lire un plugin"),
-    ("plugin:create",  "Publier un plugin"),
-    ("plugin:update",  "Modifier un plugin"),
-    ("plugin:delete",  "Supprimer un plugin"),
+    ("plugin:list", "Lister les plugins"),
+    ("plugin:read", "Lire un plugin"),
+    ("plugin:create", "Publier un plugin"),
+    ("plugin:update", "Modifier un plugin"),
+    ("plugin:delete", "Supprimer un plugin"),
     ("plugin:approve", "Approuver un plugin"),
-    ("plugin:reject",  "Rejeter un plugin"),
+    ("plugin:reject", "Rejeter un plugin"),
     ("plugin:feature", "Mettre en avant un plugin"),
     # Soumissions
-    ("submissions:list",   "Lister les soumissions"),
-    ("submissions:read",   "Lire une soumission"),
+    ("submissions:list", "Lister les soumissions"),
+    ("submissions:read", "Lire une soumission"),
     ("submissions:create", "Créer une soumission"),
     ("submissions:review", "Réviser une soumission"),
-    ("submissions:approve","Approuver une soumission"),
+    ("submissions:approve", "Approuver une soumission"),
     ("submissions:reject", "Rejeter une soumission"),
     ("submissions:delete", "Supprimer une soumission"),
-    ("submissions:write",  "Poster un nouveau plugin"),
+    ("submissions:write", "Poster un nouveau plugin"),
     # Évaluations
     ("rating:create", "Créer une évaluation"),
     ("rating:delete", "Supprimer une évaluation"),
     # Utilisateurs
-    ("user:list",   "Lister les utilisateurs"),
-    ("user:read",   "Lire un utilisateur"),
+    ("user:list", "Lister les utilisateurs"),
+    ("user:read", "Lire un utilisateur"),
     ("user:update", "Modifier un utilisateur"),
     ("user:delete", "Supprimer un utilisateur"),
-    ("user:ban",    "Bannir un utilisateur"),
+    ("user:ban", "Bannir un utilisateur"),
     # Tenants
-    ("tenant:list",   "Lister les tenants"),
-    ("tenant:read",   "Lire un tenant"),
+    ("tenant:list", "Lister les tenants"),
+    ("tenant:read", "Lire un tenant"),
     ("tenant:create", "Créer un tenant"),
     ("tenant:update", "Modifier un tenant"),
     ("tenant:delete", "Supprimer un tenant"),
-    ("tenants:read",  "Lire les tenants (routes API)"),
+    ("tenants:read", "Lire les tenants (routes API)"),
     ("tenants:write", "Modifier les tenants (routes API)"),
-    ("tenants:delete","Supprimer les tenants (routes API)"),
+    ("tenants:delete", "Supprimer les tenants (routes API)"),
     # RBAC
-    ("role:list",        "Lister les rôles"),
-    ("role:create",      "Créer un rôle"),
-    ("role:update",      "Modifier un rôle"),
-    ("role:delete",      "Supprimer un rôle"),
-    ("permission:list",  "Lister les permissions"),
-    ("permission:assign","Assigner une permission"),
-    ("rbac:read",  "Lire les rôles et permissions (routes API)"),
+    ("role:list", "Lister les rôles"),
+    ("role:create", "Créer un rôle"),
+    ("role:update", "Modifier un rôle"),
+    ("role:delete", "Supprimer un rôle"),
+    ("permission:list", "Lister les permissions"),
+    ("permission:assign", "Assigner une permission"),
+    ("rbac:read", "Lire les rôles et permissions (routes API)"),
     ("rbac:write", "Modifier les rôles et permissions (routes API)"),
     # Audit
     ("audit:read", "Lire les logs d'audit"),
     # Invitations
     ("invite:create", "Créer une invitation"),
     ("invite:revoke", "Révoquer une invitation"),
+    ("invites:read", "Lire les invitations (routes API)"),
+    ("invites:write", "Gérer les invitations (routes API)"),
     # Admin global
     ("admin:*", "Accès administrateur complet"),
     # xpulse
-    ("xpulse:publish",   "Publier un message ciblé via xpulse"),
+    ("xpulse:publish", "Publier un message ciblé via xpulse"),
     ("xpulse:broadcast", "Broadcaster un message à tous les users via xpulse"),
+    ("license:read", "Lire les licences"),
 ]
 
 # Permissions accordées à tout utilisateur inscrit
@@ -87,7 +90,22 @@ USER_PERMISSIONS: list[str] = [
     "user:read",
 ]
 
+# Permissions du propriétaire/admin d'un tenant — gestion de SON tenant
+# uniquement. Surtout PAS admin:* (god-mode plateforme) ni les opérations
+# destructives globales (user:delete, tenants:delete, rbac:write…).
+TENANT_ADMIN_PERMISSIONS: list[str] = [
+    "tenants:read",
+    "tenants:write",
+    "invites:read",
+    "invites:write",
+    "audit:read",
+    "rbac:read",
+    "user:read",
+    "license:read",
+]
+
 # ── Fonctions seed ────────────────────────────────────────────────────────────
+
 
 async def seed_permissions(session: AsyncSession) -> dict[str, Permission]:
     repo = PermissionRepository(session)
@@ -122,7 +140,9 @@ async def seed_admin_role(
 ) -> Role:
     role_repo = RoleRepository(session)
     existing_roles = await role_repo.list_for_tenant(None)
-    admin_role = next((r for r in existing_roles if r.name == cfg["ADMIN_ROLE_NAME"]), None)
+    admin_role = next(
+        (r for r in existing_roles if r.name == cfg["ADMIN_ROLE_NAME"]), None
+    )
 
     if admin_role is None:
         admin_role = Role(
@@ -150,7 +170,9 @@ async def seed_user_role(
 ) -> Role:
     role_repo = RoleRepository(session)
     existing_roles = await role_repo.list_for_tenant(None)
-    user_role = next((r for r in existing_roles if r.name == cfg["USER_ROLE_NAME"]), None)
+    user_role = next(
+        (r for r in existing_roles if r.name == cfg["USER_ROLE_NAME"]), None
+    )
 
     if user_role is None:
         user_role = Role(
@@ -171,6 +193,39 @@ async def seed_user_role(
 
     await session.flush()
     return user_role_loaded
+
+
+async def seed_tenant_admin_role(
+    session: AsyncSession,
+    permissions: dict[str, Permission],
+    role_name: str = "tenant_admin",
+) -> Role:
+    """
+    Rôle global attribué au propriétaire d'un tenant : gère son tenant sans
+    aucun privilège plateforme (pas de admin:*). Distinct du rôle 'admin'.
+    """
+    role_repo = RoleRepository(session)
+    existing_roles = await role_repo.list_for_tenant(None)
+    role = next((r for r in existing_roles if r.name == role_name), None)
+
+    if role is None:
+        role = Role(
+            name=role_name,
+            tenant_id=None,
+            description="Propriétaire d'un tenant — gestion limitée à son tenant",
+        )
+        await role_repo.save(role)
+        logger.info("Rôle '%s' créé", role_name)
+
+    role = await role_repo.get_with_permissions(role.id)
+    existing_perm_names = {p.name for p in role.permissions}
+    for perm_name in TENANT_ADMIN_PERMISSIONS:
+        perm = permissions.get(perm_name)
+        if perm and perm.name not in existing_perm_names:
+            role.permissions.append(perm)
+
+    await session.flush()
+    return role
 
 
 async def seed_admin_user(
@@ -223,9 +278,10 @@ async def run_seed(db: Any, cfg: dict) -> None:
     async with db.session() as session:
         try:
             permissions = await seed_permissions(session)
-            tenant      = await seed_default_tenant(session, cfg)
-            admin_role  = await seed_admin_role(session, tenant.id, permissions, cfg)
+            tenant = await seed_default_tenant(session, cfg)
+            admin_role = await seed_admin_role(session, tenant.id, permissions, cfg)
             await seed_user_role(session, permissions, cfg)
+            await seed_tenant_admin_role(session, permissions)
             await seed_admin_user(session, tenant, admin_role, cfg)
             await session.commit()
             logger.info(
@@ -241,10 +297,13 @@ async def run_seed(db: Any, cfg: dict) -> None:
     try:
         async with db.session() as session:
             from ..repositories.invite import InviteRepository
+
             repo = InviteRepository(session)
             count = await repo.deactivate_expired()
             if count:
-                logger.info("Cleanup : %d invitation(s) expirée(s) désactivée(s)", count)
+                logger.info(
+                    "Cleanup : %d invitation(s) expirée(s) désactivée(s)", count
+                )
             await session.commit()
     except Exception:
         logger.warning("Cleanup invitations échoué (non bloquant)", exc_info=True)
