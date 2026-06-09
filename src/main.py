@@ -37,6 +37,7 @@ from .schemas.auth import (
     LogoutRequest,
     RefreshRequest,
     RegisterRequest,
+    SelectTenantRequest,
     SetupCreateRequest,
     SetupJoinRequest,
     TokenResponse,
@@ -411,6 +412,29 @@ def _auth_router_with_db(
                 result = await svc.setup_join_tenant(
                     refresh_token=body.refresh_token,
                     invite_token=body.invite_token,
+                    ip_address=ip,
+                )
+                await session.commit()
+                return result
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/select-tenant", response_model=TokenResponse)
+    async def select_tenant(body: SelectTenantRequest, request: Request):
+        ip = _extract_ip(request)
+        async with db.session() as session:
+            svc = AuthService(
+                session,
+                token_service,
+                events,
+                cache=cache,
+                user_role_name=user_role_name,
+                admin_role_name=admin_role_name,
+            )
+            try:
+                result = await svc.select_tenant(
+                    refresh_token=body.refresh_token,
+                    tenant_id=body.tenant_id,
                     ip_address=ip,
                 )
                 await session.commit()

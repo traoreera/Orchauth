@@ -24,6 +24,16 @@ class InviteRepository(BaseRepository[Invite]):
         )
         return list(result.scalars().all())
 
+    async def list_for_email(self, email: str) -> list[Invite]:
+        """Invitations reçues par un email (pour l'user connecté)."""
+        result = await self.session.execute(
+            select(Invite)
+            .where(Invite.email == email)
+            .where(Invite.is_active == True)  # noqa: E712
+            .where(Invite.used_at.is_(None))
+        )
+        return list(result.scalars().all())
+
     async def deactivate_expired(self) -> int:
         """Marque comme inactives toutes les invitations expirées. Retourne le nombre traité."""
         now = datetime.now(tz=timezone.utc)

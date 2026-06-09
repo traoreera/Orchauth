@@ -92,3 +92,20 @@ class InviteService:
     async def get_invite_by_token(self, token: str) -> Optional[Invite]:
         repo = InviteRepository(self._session)
         return await repo.get_by_token(token)
+
+    async def list_for_email(self, email: str) -> list[Invite]:
+        """Invitations en attente pour l'adresse email de l'user connecté."""
+        repo = InviteRepository(self._session)
+        return await repo.list_for_email(email)
+
+    async def revoke_invite(self, invite_id: str, requester_id: str, is_platform_admin: bool = False) -> Invite:
+        repo = InviteRepository(self._session)
+        invite = await repo.get(invite_id)
+        if invite is None:
+            raise ValueError("Invite not found")
+        # Seul l'inviteur ou un admin plateforme peut révoquer
+        if not is_platform_admin and invite.invited_by != requester_id:
+            raise PermissionError("Not allowed to revoke this invite")
+        invite.is_active = False
+        await self._session.flush()
+        return invite
