@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import base64
+import json
+import urllib.parse
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from xcore.kernel.api import AuthPayload, get_current_user
 
@@ -43,6 +47,7 @@ def oauth_router(
         provider: str,
         tenant_id: str | None = None,
         redirect: str | None = None,
+        link_user_id: str | None = None,
     ) -> Any:
         """
         Retourne l'URL d'autorisation du provider.
@@ -52,7 +57,10 @@ def oauth_router(
             svc = _svc(session)
             try:
                 url = await svc.get_auth_url(
-                    provider, tenant_id=tenant_id, post_login_redirect=redirect
+                    provider,
+                    tenant_id=tenant_id,
+                    post_login_redirect=redirect,
+                    link_user_id=link_user_id,
                 )
                 return {"auth_url": url, "provider": provider}
             except ValueError as exc:
@@ -67,7 +75,7 @@ def oauth_router(
     ) -> Any:
         """
         Point d'entrée retour provider. Échange le code, crée/retrouve le user,
-        retourne les tokens xauth.
+        redirige vers erp://oauth-callback?... (deep-link Tauri).
         """
         ip = _extract_ip(request)
         async with db.session() as session:
@@ -75,11 +83,32 @@ def oauth_router(
             try:
                 result = await svc.handle_callback(provider, code, state, ip_address=ip)
                 await session.commit()
-                return result
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc))
-            except Exception as exc:
-                raise HTTPException(status_code=502, detail=f"Erreur provider : {exc}")
+            except (ValueError, Exception) as exc:
+                error = urllib.parse.quote(str(exc), safe="")
+                return RedirectResponse(f"erp://oauth-callback?error={error}", status_code=302)
+
+        # Mode liaison → erp://oauth-link?success=true&...
+        if result.get("is_link"):
+            params = urllib.parse.urlencode({
+                "success": "true",
+                "provider": result.get("provider", ""),
+                "email": result.get("provider_email", "") or "",
+            })
+            return RedirectResponse(f"erp://oauth-link?{params}", status_code=302)
+
+        # Mode login → erp://oauth-callback?...
+        params: dict[str, str] = {
+            "access_token": result.get("access_token", "") or "",
+            "refresh_token": result.get("refresh_token", "") or "",
+            "user_id": result.get("user_id", "") or "",
+        }
+        if result.get("onboarding_required"):
+            params["onboarding"] = "true"
+        if tenants := result.get("tenants"):
+            params["tenants"] = base64.b64encode(json.dumps(tenants).encode()).decode()
+
+        redirect_url = "erp://oauth-callback?" + urllib.parse.urlencode(params)
+        return RedirectResponse(redirect_url, status_code=302)
 
     @router.post("/{provider}/link")
     async def link_provider(

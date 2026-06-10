@@ -164,10 +164,23 @@ def tenants_router(db: Any, events: XAuthEvents | None = None) -> APIRouter:
         payload: AuthPayload = Depends(get_current_user),
     ) -> Any:
         async with db.session() as session:
-            # Tout membre du tenant peut lister les membres (ou admin plateforme).
             await _require_tenant_scope(session, payload, tenant_id)
             repo = TenantMemberRepository(session)
-            return await repo.get_members_of_tenant(tenant_id)
+            members = await repo.get_members_of_tenant(tenant_id)
+            # Enrichit chaque membre avec l'email (relation user déjà chargée via selectinload)
+            results = []
+            for m in members:
+                item = {
+                    "id": m.id,
+                    "user_id": m.user_id,
+                    "tenant_id": m.tenant_id,
+                    "role_id": m.role_id,
+                    "joined_at": m.joined_at,
+                    "is_owner": m.is_owner,
+                    "email": m.user.email if m.user else None,
+                }
+                results.append(item)
+            return results
 
     @router.delete(
         "/{tenant_id}/members/{user_id}",

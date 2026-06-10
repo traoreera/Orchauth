@@ -71,6 +71,7 @@ class UserResponse(BaseModel):
     email: str
     is_active: bool
     mfa_enabled: bool
+    has_password: bool = False
 
     class Config:
         from_attributes = True

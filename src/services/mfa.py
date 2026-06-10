@@ -48,9 +48,22 @@ class MFAService:
         totp = pyotp.TOTP(secret)
         uri = totp.provisioning_uri(name=user.email, issuer_name="xauth")
 
+        # Génère le QR code en base64 PNG pour l'affichage dans l'app
+        try:
+            import base64
+            import io
+            import qrcode as _qrcode
+            img = _qrcode.make(uri)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            qr_b64 = base64.b64encode(buf.getvalue()).decode()
+        except Exception:
+            qr_b64 = None
+
         return {
             "secret": secret,
-            "provisioning_uri": uri,
+            "otpauth_url": uri,
+            "qr_code": qr_b64,
             "backup_codes": backup_codes_plain,
         }
 

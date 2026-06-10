@@ -61,6 +61,7 @@ class OAuthService:
         provider_name: str,
         tenant_id: Optional[str] = None,
         post_login_redirect: Optional[str] = None,
+        link_user_id: Optional[str] = None,
     ) -> str:
         provider = self.get_provider(provider_name)
 
@@ -69,6 +70,7 @@ class OAuthService:
             "provider": provider_name,
             "tenant_id": tenant_id,
             "redirect": post_login_redirect,
+            "link_user_id": link_user_id,
         }
         await self._cache.set(
             f"{_STATE_KEY_PREFIX}{state}",
@@ -96,6 +98,35 @@ class OAuthService:
         state_data = json.loads(raw)
         if state_data.get("provider") != provider_name:
             raise ValueError("State OAuth : provider mismatch.")
+
+        # Mode liaison — compléter directement sans créer de session
+        link_user_id = state_data.get("link_user_id")
+        if link_user_id:
+            provider = self.get_provider(provider_name)
+            token_data = await provider.exchange_code(code)
+            access_token_provider = token_data.get("access_token")
+            if not access_token_provider:
+                raise ValueError("Échange de code échoué.")
+            user_info = await provider.get_user_info(access_token_provider)
+            oauth_repo = OAuthAccountRepository(self._session)
+            existing = await oauth_repo.get_by_provider(provider_name, user_info.provider_user_id)
+            if existing and existing.user_id != link_user_id:
+                raise ValueError(f"Ce compte {provider_name} est déjà lié à un autre utilisateur.")
+            if not existing:
+                account = OAuthAccount(
+                    user_id=link_user_id,
+                    provider=provider_name,
+                    provider_user_id=user_info.provider_user_id,
+                    provider_email=user_info.email,
+                    provider_name=user_info.name,
+                    provider_avatar=user_info.avatar_url,
+                )
+                await oauth_repo.save(account)
+            return {
+                "is_link": True,
+                "provider": provider_name,
+                "provider_email": user_info.email,
+            }
 
         provider = self.get_provider(provider_name)
 

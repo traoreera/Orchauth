@@ -19,6 +19,7 @@ class AcceptInviteRequest(BaseModel):
 class InviteResponse(BaseModel):
     id: str
     tenant_id: str
+    tenant_name: Optional[str] = None
     email: str
     token: str
     role_id: Optional[str]

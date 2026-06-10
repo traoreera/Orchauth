@@ -34,6 +34,7 @@ class MemberResponse(BaseModel):
     role_id: Optional[str]
     joined_at: datetime
     is_owner: bool
+    email: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -16,7 +16,6 @@ from ..repositories.rbac import (
 )
 from ..repositories.user import TenantMemberRepository
 
-
 _PERM_CACHE_TTL = 300
 _CACHE_KEY_TPL = "xauth:perms:{user_id}:{tenant_id}"
 
@@ -74,9 +73,7 @@ class RBACService:
         repo = PermissionRepository(self._session)
         return await repo.all()
 
-    async def assign_permission_to_role(
-        self, role_id: str, permission_id: str
-    ) -> Role:
+    async def assign_permission_to_role(self, role_id: str, permission_id: str) -> Role:
         role_repo = RoleRepository(self._session)
         perm_repo = PermissionRepository(self._session)
 
@@ -126,9 +123,7 @@ class RBACService:
         await self._invalidate_cache(user_id, tenant_id)
         return membership
 
-    async def get_permissions_for_user(
-        self, user_id: str, tenant_id: str
-    ) -> list[str]:
+    async def get_permissions_for_user(self, user_id: str, tenant_id: str) -> list[str]:
         # Try cache first
         cache_key = _CACHE_KEY_TPL.format(user_id=user_id, tenant_id=tenant_id)
         if self._cache:
@@ -172,7 +167,9 @@ class RBACService:
         # Store in cache
         if self._cache:
             try:
-                await self._cache.set(cache_key, json.dumps(permissions), ex=_PERM_CACHE_TTL)
+                await self._cache.set(
+                    cache_key, json.dumps(permissions), ex=_PERM_CACHE_TTL
+                )
             except Exception:
                 pass
 
@@ -210,6 +207,8 @@ class RBACService:
     async def reconcile_plugin_grants(
         self, plugin: str, grants: list[dict]
     ) -> dict[str, int]:
+        import rich
+
         """Synchronise le catalogue avec les grants déclarés par un plugin.
 
         Déclaratif & idempotent : `grants` = état complet du plugin. Upsert des
@@ -221,6 +220,7 @@ class RBACService:
             name = (g or {}).get("name")
             if _is_valid_grant(plugin, name):
                 desired[name] = g
+            rich.print({"name": name, "valid": _is_valid_grant(plugin, name)}, g)
 
         upserted = 0
         for name, g in desired.items():
@@ -232,9 +232,10 @@ class RBACService:
             perm.tenant_grantable = bool(g.get("tenant_grantable", False))
             perm.source_plugin = plugin
             perm.active = True
-            await perm_repo.save(perm)
+            obj = await perm_repo.save(perm)
             upserted += 1
 
+            rich.print(obj.__dict__)
         disabled = 0
         for perm in await perm_repo.list_by_plugin(plugin):
             if perm.name not in desired and perm.active:
@@ -265,7 +266,8 @@ class RBACService:
         perms = await PermissionRepository(self._session).list_grantable()
         if entitled_plugins is not None:
             perms = [
-                p for p in perms
+                p
+                for p in perms
                 if p.source_plugin is None or p.source_plugin in entitled_plugins
             ]
         return perms

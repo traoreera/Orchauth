@@ -36,12 +36,8 @@ def invites_router(
         user: AuthPayload = Depends(require_permission("invites:write")),
     ) -> Any:
         async with db.session() as session:
-            # L'appelant doit être owner du tenant ciblé (ou admin plateforme) :
-            # empêche d'inviter sur le tenant d'autrui.
             await require_tenant_scope(session, user, body.tenant_id, owner_only=True)
 
-            # Anti-escalade : un owner ne peut pas attribuer un rôle portant
-            # admin:* (god-mode plateforme). Seul l'admin plateforme le peut.
             if body.role_id and not is_platform_admin(user):
                 role = await RoleRepository(session).get_with_permissions(body.role_id)
                 if role is None:
@@ -51,6 +47,10 @@ def invites_router(
                         status_code=403,
                         detail="Attribution d'un rôle administrateur plateforme interdite",
                     )
+
+            # Charge le tenant AVANT le commit pour avoir le vrai nom
+            tenant = await TenantRepository(session).get(body.tenant_id)
+            tenant_name = tenant.name if tenant else body.tenant_id
 
             svc = InviteService(session, events)
             try:
@@ -64,11 +64,11 @@ def invites_router(
                 await session.commit()
                 await session.refresh(invite)
 
-                # Envoyer l'email d'invitation
+                # Email avec le vrai nom du tenant
                 await email_service.invite.send_invitation(
                     to=invite.email,
                     invite_token=invite.token,
-                    tenant_name=body.tenant_id,
+                    tenant_name=tenant_name,
                     invited_by=user["sub"],
                     expires_hours=body.expires_hours,
                 )
@@ -82,28 +82,44 @@ def invites_router(
                 user_repo = UserRepository(session)
                 invitee = await user_repo.get_by_email(invite.email)
                 if invitee:
-                    tenant = await TenantRepository(session).get(body.tenant_id)
-                    tenant_name = tenant.name if tenant else body.tenant_id
                     await _notify(session, str(invitee.id),
                         f"Vous avez été invité à rejoindre {tenant_name}",
                         {"event": "invite.received", "invite_id": str(invite.id),
                          "tenant_id": body.tenant_id, "tenant_name": tenant_name,
                          "token": invite.token})
 
-                return invite
+                result = invite.__dict__.copy()
+                result["tenant_name"] = tenant_name
+                return result
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
 
-    @router.get("/{tenant_id}", response_model=List[InviteResponse])
-    async def list_invites(
-        tenant_id: str,
-        user: AuthPayload = Depends(require_permission("invites:read")),
+    # ── Routes sans paramètre de chemin dynamique en premier ──────────────────
+    # IMPORTANT : /me, /token/{token} et /accept doivent être AVANT /{tenant_id}
+    # sinon FastAPI route /me → /{tenant_id}="me" et la route est silencieusement ignorée.
+
+    @router.get("/me", response_model=List[InviteResponse])
+    async def my_invites(
+        user: AuthPayload = Depends(get_current_user),
     ) -> Any:
+        """Retourne les invitations en attente pour l'email de l'utilisateur connecté."""
         async with db.session() as session:
-            # Lecture limitée aux invitations de SON tenant (ou admin plateforme).
-            await require_tenant_scope(session, user, tenant_id)
+            user_repo = UserRepository(session)
+            db_user = await user_repo.get(user["sub"])
+            if db_user is None:
+                raise HTTPException(status_code=404, detail="User not found")
             svc = InviteService(session)
-            return await svc.list_invites(tenant_id)
+            invites = await svc.list_for_email(db_user.email)
+
+            # Enrichit chaque invitation avec le nom lisible du tenant
+            tenant_repo = TenantRepository(session)
+            results = []
+            for inv in invites:
+                t = await tenant_repo.get(inv.tenant_id)
+                item = inv.__dict__.copy()
+                item["tenant_name"] = t.name if t else None
+                results.append(item)
+            return results
 
     @router.get("/token/{token}", response_model=InviteResponse)
     async def get_invite(token: str) -> Any:
@@ -113,20 +129,22 @@ def invites_router(
             invite = await svc.get_invite_by_token(token)
             if invite is None:
                 raise HTTPException(status_code=404, detail="Invite not found")
-            return invite
+            tenant = await TenantRepository(session).get(invite.tenant_id)
+            item = invite.__dict__.copy()
+            item["tenant_name"] = tenant.name if tenant else None
+            return item
 
     @router.post("/accept", response_model=dict)
     async def accept_invite(
         body: AcceptInviteRequest,
         user: AuthPayload = Depends(get_current_user),
     ) -> Any:
-        """
-        L'utilisateur doit être authentifié.
-        Le user_id vient du token — body.user_id est ignoré.
-        """
         async with db.session() as session:
             svc = InviteService(session)
             try:
+                # Charge l'invite AVANT accept pour avoir invited_by après commit
+                invite_obj = await svc.get_invite_by_token(body.token)
+
                 membership = await svc.accept_invite(
                     token=body.token,
                     user_id=user["sub"],
@@ -134,7 +152,6 @@ def invites_router(
                 await session.commit()
 
                 # Notifier l'inviteur que son invitation a été acceptée
-                invite_obj = await svc.get_invite_by_token(body.token)
                 if invite_obj:
                     tenant = await TenantRepository(session).get(membership.tenant_id)
                     tenant_name = tenant.name if tenant else membership.tenant_id
@@ -154,18 +171,26 @@ def invites_router(
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
 
-    @router.get("/me", response_model=List[InviteResponse])
-    async def my_invites(
-        user: AuthPayload = Depends(get_current_user),
+    # ── Routes avec paramètre dynamique (après les routes fixes) ──────────────
+
+    @router.get("/{tenant_id}", response_model=List[InviteResponse])
+    async def list_invites(
+        tenant_id: str,
+        user: AuthPayload = Depends(require_permission("invites:read")),
     ) -> Any:
-        """Retourne les invitations en attente pour l'email de l'utilisateur connecté."""
         async with db.session() as session:
-            user_repo = UserRepository(session)
-            db_user = await user_repo.get(user["sub"])
-            if db_user is None:
-                raise HTTPException(status_code=404, detail="User not found")
+            await require_tenant_scope(session, user, tenant_id)
             svc = InviteService(session)
-            return await svc.list_for_email(db_user.email)
+            invites = await svc.list_invites(tenant_id)
+
+            tenant = await TenantRepository(session).get(tenant_id)
+            tenant_name = tenant.name if tenant else None
+            results = []
+            for inv in invites:
+                item = inv.__dict__.copy()
+                item["tenant_name"] = tenant_name
+                results.append(item)
+            return results
 
     @router.delete("/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def revoke_invite(

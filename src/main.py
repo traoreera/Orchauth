@@ -196,7 +196,12 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
                 return
             async with db.session() as session:
                 svc = RBACService(session, cache=cache)
-                await svc.reconcile_plugin_grants(plugin, data.get("grants", []))
+                response = await svc.reconcile_plugin_grants(
+                    plugin, data.get("grants", [])
+                )
+                import rich
+
+                rich.print(data, response)
                 await session.commit()
 
         @events.on("plugin.*.unloaded")
@@ -497,7 +502,7 @@ def _build_oauth_providers(
         client_id = env.get(id_key, "")
         client_secret = env.get(secret_key, "")
         if client_id and client_secret:
-            redirect_uri = f"{base_url}/xauth/oauth/{name}/callback"
+            redirect_uri = f"{base_url}/app/auth/oauth/{name}/callback"
             providers[name] = cls(client_id, client_secret, redirect_uri)
 
     return providers

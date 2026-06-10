@@ -91,6 +91,7 @@ def auth_router(auth_service: AuthService, token_service: TokenService, db: Any 
                 "email": user.email,
                 "is_active": user.is_active,
                 "mfa_enabled": user.mfa_enabled,
+                "has_password": bool(user.hashed_password),
             }
 
         # fallback si db non injecté — utilise les claims du JWT
