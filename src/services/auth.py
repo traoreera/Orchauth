@@ -591,8 +591,11 @@ class AuthService:
         access_token, jti = self._token.create_access_token(
             user_id=session.user_id, tenant_id=tenant.id
         )
+        new_refresh_plain = self._token.create_refresh_token()
+        new_refresh_hashed = self._token.hash_token(new_refresh_plain)
         session.tenant_id = tenant.id
         session.last_jti = jti
+        session.refresh_token = new_refresh_hashed
         await self._session.flush()
 
         audit = AuditService(self._session)
@@ -607,7 +610,7 @@ class AuthService:
 
         return {
             "access_token": access_token,
-            "refresh_token": refresh_token,
+            "refresh_token": new_refresh_plain,
             "token_type": "bearer",
             "user_id": session.user_id,
             "tenant_id": tenant.id,
@@ -672,8 +675,11 @@ class AuthService:
         access_token, jti = self._token.create_access_token(
             user_id=user.id, tenant_id=invite.tenant_id
         )
+        new_refresh_plain = self._token.create_refresh_token()
+        new_refresh_hashed = self._token.hash_token(new_refresh_plain)
         session.tenant_id = invite.tenant_id
         session.last_jti = jti
+        session.refresh_token = new_refresh_hashed
         await self._session.flush()
 
         audit = AuditService(self._session)
@@ -688,7 +694,7 @@ class AuthService:
 
         return {
             "access_token": access_token,
-            "refresh_token": refresh_token,
+            "refresh_token": new_refresh_plain,
             "token_type": "bearer",
             "user_id": user.id,
             "tenant_id": invite.tenant_id,

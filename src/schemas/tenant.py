@@ -15,6 +15,15 @@ class TenantUpdate(BaseModel):
     settings: Optional[dict] = None
 
 
+class TenantSettingsUpdate(BaseModel):
+    settings: dict
+
+
+class TenantSettingsResponse(BaseModel):
+    tenant_id: str
+    settings: dict
+
+
 class TenantResponse(BaseModel):
     id: str
     name: str

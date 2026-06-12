@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, List, Optional
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
 from .base import Base
@@ -51,6 +51,9 @@ class User(Base):
     oauth_accounts: Mapped[List["OAuthAccount"]] = relationship(
         "OAuthAccount", back_populates="user", cascade="all, delete-orphan"
     )
+    notifications: Mapped[List["Notification"]] = relationship(  # type: ignore[name-defined]
+        "Notification", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class TenantMember(Base):
@@ -70,6 +73,10 @@ class TenantMember(Base):
     )
     joined_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     is_owner: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "tenant_id", name="uq_tenant_member"),
+    )
 
     user: Mapped["User"] = relationship("User", back_populates="tenant_memberships")
     tenant: Mapped["Tenant"] = relationship("Tenant", back_populates="members")

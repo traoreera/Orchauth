@@ -22,9 +22,11 @@ from .providers import (
 )
 from .providers.base import OAuthProvider
 from .routes import (
+    account_router,
     audit_router,
     invites_router,
     mfa_router,
+    notifications_router,
     oauth_router,
     password_router,
     rbac_router,
@@ -49,6 +51,7 @@ from .services.events import XAuthEvents
 from .services.rbac import RBACService
 from .services.seed import run_seed
 from .services.token import TokenService
+from .utils.rate_limit import RateLimiter
 
 
 class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
@@ -169,6 +172,8 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
             password_router(db, cache, self._email_service, self._events)
         )
         self.app.include_router(sessions_router(db, self._token_service, cache=cache))
+        self.app.include_router(account_router(db))
+        self.app.include_router(notifications_router(db))
         self.app.include_router(
             admin_router(db, cache=cache, token_service=self._token_service)
         )
@@ -196,12 +201,8 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
                 return
             async with db.session() as session:
                 svc = RBACService(session, cache=cache)
-                response = await svc.reconcile_plugin_grants(
-                    plugin, data.get("grants", [])
-                )
-                import rich
+                await svc.reconcile_plugin_grants(plugin, data.get("grants", []))
 
-                rich.print(data, response)
                 await session.commit()
 
         @events.on("plugin.*.unloaded")
@@ -264,6 +265,10 @@ def _auth_router_with_db(
 ) -> APIRouter:
     router = APIRouter(tags=["auth"])
 
+    _rl_login    = RateLimiter(cache, max_calls=10, period=60).for_route("login")
+    _rl_register = RateLimiter(cache, max_calls=5,  period=60).for_route("register")
+    _rl_refresh  = RateLimiter(cache, max_calls=30, period=60).for_route("refresh")
+
     def _extract_ip(request: Request) -> str:
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
@@ -273,7 +278,7 @@ def _auth_router_with_db(
     @router.post(
         "/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED
     )
-    async def register(body: RegisterRequest):
+    async def register(body: RegisterRequest, _rl: None = Depends(_rl_register)):
         async with db.session() as session:
             svc = AuthService(
                 session,
@@ -304,7 +309,7 @@ def _auth_router_with_db(
                 raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/login", response_model=TokenResponse)
-    async def login(body: LoginRequest, request: Request):
+    async def login(body: LoginRequest, request: Request, _rl: None = Depends(_rl_login)):
         ip = _extract_ip(request)
         async with db.session() as session:
             svc = AuthService(
@@ -328,7 +333,7 @@ def _auth_router_with_db(
                 raise HTTPException(status_code=401, detail=str(exc))
 
     @router.post("/refresh", response_model=TokenResponse)
-    async def refresh(body: RefreshRequest, request: Request):
+    async def refresh(body: RefreshRequest, request: Request, _rl: None = Depends(_rl_refresh)):
         ip = _extract_ip(request)
         async with db.session() as session:
             svc = AuthService(

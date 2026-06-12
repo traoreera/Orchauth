@@ -2,35 +2,45 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from xcore.sdk import AutoDispatchMixin, action, error, ok, validate_payload
+from xcore.sdk import (
+    AutoDispatchMixin,
+    action,
+    error,
+    get_logger,
+    ok,
+    schema,
+    validate_payload,
+)
+
+logger = get_logger(__name__)
 
 # ---------- Payload schemas ----------
 
-VERIFY_TOKEN_SCHEMA: TypedDict = { # type: ignore
+VERIFY_TOKEN_SCHEMA: TypedDict = {  # type: ignore
     "token": (str, ...),
-} # type: ignore
+}  # type: ignore
 
-HAS_PERMISSION_SCHEMA: TypedDict = {# type: ignore
+HAS_PERMISSION_SCHEMA: TypedDict = {  # type: ignore
     "user_id": (str, ...),
     "tenant_id": (str, ...),
     "permission": (str, ...),
 }
 
-GET_USER_SCHEMA: TypedDict = {# type: ignore
+GET_USER_SCHEMA: TypedDict = {  # type: ignore
     "user_id": (str, ...),
 }
 
-GET_TENANT_SCHEMA: TypedDict = {# type: ignore
+GET_TENANT_SCHEMA: TypedDict = {  # type: ignore
     "tenant_id": (str, ...),
 }
 
-TENANT_ACCESS_SCHEMA: TypedDict = {# type: ignore
+TENANT_ACCESS_SCHEMA: TypedDict = {  # type: ignore
     "user_id": (str, ...),
     "tenant_id": (str, ...),
     "permissions": (list, None),
 }
 
-CREATE_INVITE_SCHEMA: TypedDict = {# type: ignore
+CREATE_INVITE_SCHEMA: TypedDict = {  # type: ignore
     "tenant_id": (str, ...),
     "invited_by": (str, ...),
     "email": (str, ...),
@@ -38,7 +48,7 @@ CREATE_INVITE_SCHEMA: TypedDict = {# type: ignore
     "expires_hours": (int, 72),
 }
 
-LOG_EVENT_SCHEMA: TypedDict = {# type: ignore
+LOG_EVENT_SCHEMA: TypedDict = {  # type: ignore
     "action": (str, ...),
     "tenant_id": (str, None),
     "user_id": (str, None),
@@ -49,7 +59,9 @@ LOG_EVENT_SCHEMA: TypedDict = {# type: ignore
     "metadata": (dict, None),
 }
 
-
+GET_USERS_WITH_TENNANT: TypedDict = {  # type:ignore
+    "tennant_id": (str, None)
+}
 # ---------- IPC command mixin ----------
 
 
@@ -61,19 +73,21 @@ class IPCCommands(AutoDispatchMixin):
     """
 
     @action("xauth.verify_token")
-    @validate_payload(VERIFY_TOKEN_SCHEMA, type_response="model", unset=False) # type: ignore
+    @validate_payload(VERIFY_TOKEN_SCHEMA, type_response="model", unset=False)  # type: ignore
     async def _ipc_verify_token(self, payload) -> dict:
         try:
-            claims = self._token_service.verify_access_token(payload.token) # # type: ignore
+            claims = self._token_service.verify_access_token(
+                payload.token
+            )  # # type: ignore
             # Fetch permissions for the user in their tenant
             tenant_id = claims.get("tenant_id")
             user_id = claims["sub"]
             permissions: list[str] = []
             if tenant_id:
-                async with self._db.session() as session:# # type: ignore
+                async with self._db.session() as session:  # # type: ignore
                     from .services.rbac import RBACService
 
-                    svc = RBACService(session, cache=self._cache) # # type: ignore
+                    svc = RBACService(session, cache=self._cache)  # # type: ignore
                     permissions = await svc.get_permissions_for_user(user_id, tenant_id)
             return ok(
                 user_id=user_id,
@@ -87,13 +101,13 @@ class IPCCommands(AutoDispatchMixin):
             return error(f"Token verification failed: {exc}", code="error")
 
     @action("xauth.has_permission")
-    @validate_payload(HAS_PERMISSION_SCHEMA, type_response="model", unset=False) # type: ignore
+    @validate_payload(HAS_PERMISSION_SCHEMA, type_response="model", unset=False)  # type: ignore
     async def _ipc_has_permission(self, payload) -> dict:
         try:
-            async with self._db.session() as session: # type: ignore
+            async with self._db.session() as session:  # type: ignore
                 from .services.rbac import RBACService
 
-                svc = RBACService(session, cache=self._cache) # # type: ignore
+                svc = RBACService(session, cache=self._cache)  # # type: ignore
                 result = await svc.has_permission(
                     payload.user_id, payload.tenant_id, payload.permission
                 )
@@ -102,10 +116,10 @@ class IPCCommands(AutoDispatchMixin):
             return error(str(exc), code="error")
 
     @action("xauth.get_user")
-    @validate_payload(GET_USER_SCHEMA, type_response="model", unset=False) # type: ignore
+    @validate_payload(GET_USER_SCHEMA, type_response="model", unset=False)  # type: ignore
     async def _ipc_get_user(self, payload) -> dict:
         try:
-            async with self._db.session() as session: # type: ignore
+            async with self._db.session() as session:  # type: ignore
                 from .repositories.user import UserRepository
 
                 repo = UserRepository(session)
@@ -124,10 +138,12 @@ class IPCCommands(AutoDispatchMixin):
             return error(str(exc), code="error")
 
     @action("xauth.get_tenant")
-    @validate_payload(GET_TENANT_SCHEMA, type_response="model", unset=False) # # type: ignore
+    @validate_payload(
+        GET_TENANT_SCHEMA, type_response="model", unset=False
+    )  # # type: ignore
     async def _ipc_get_tenant(self, payload) -> dict:
         try:
-            async with self._db.session() as session: # # type: ignore
+            async with self._db.session() as session:  # # type: ignore
                 from .repositories.tenant import TenantRepository
 
                 repo = TenantRepository(session)
@@ -145,7 +161,7 @@ class IPCCommands(AutoDispatchMixin):
             return error(str(exc), code="error")
 
     @action("xauth.tenant_access")
-    @validate_payload(TENANT_ACCESS_SCHEMA, type_response="model", unset=False) # type: ignore
+    @validate_payload(TENANT_ACCESS_SCHEMA, type_response="model", unset=False)  # type: ignore
     async def _ipc_tenant_access(self, payload) -> dict:
         """
         Résout l'accès d'un user à un tenant pour les plugins tiers (xlicense…).
@@ -159,7 +175,7 @@ class IPCCommands(AutoDispatchMixin):
             perms = getattr(payload, "permissions", None) or []
             if "admin:*" in perms:
                 return ok(has_access=True, can_manage=True)
-            async with self._db.session() as session: # type: ignore
+            async with self._db.session() as session:  # type: ignore
                 from .repositories.user import TenantMemberRepository
 
                 member_repo = TenantMemberRepository(session)
@@ -176,10 +192,12 @@ class IPCCommands(AutoDispatchMixin):
             return error(str(exc), code="error")
 
     @action("xauth.create_invite")
-    @validate_payload(CREATE_INVITE_SCHEMA, type_response="model", unset=False) # # type: ignore
+    @validate_payload(
+        CREATE_INVITE_SCHEMA, type_response="model", unset=False
+    )  # # type: ignore
     async def _ipc_create_invite(self, payload) -> dict:
         try:
-            async with self._db.session() as session: # type: ignore
+            async with self._db.session() as session:  # type: ignore
                 from .services.invite import InviteService
 
                 svc = InviteService(session)
@@ -204,10 +222,10 @@ class IPCCommands(AutoDispatchMixin):
             return error(str(exc), code="error")
 
     @action("xauth.log_event")
-    @validate_payload(LOG_EVENT_SCHEMA, type_response="model", unset=False) # type: ignore
+    @validate_payload(LOG_EVENT_SCHEMA, type_response="model", unset=False)  # type: ignore
     async def _ipc_log_event(self, payload) -> dict:
         try:
-            async with self._db.session() as session: # # type: ignore
+            async with self._db.session() as session:  # # type: ignore
                 from .services.audit import AuditService
 
                 svc = AuditService(session)
@@ -225,3 +243,14 @@ class IPCCommands(AutoDispatchMixin):
                 return ok(audit_log_id=entry.id)
         except Exception as exc:
             return error(str(exc), code="error")
+
+    @action("xauth.users.list.tennant")
+    @validate_payload(schema=GET_USERS_WITH_TENNANT, type_response="model", unset=False)  # type: ignore
+    async def _ipc_list_tenant_users(self, payload):
+        from .repositories.user import TenantMemberRepository
+
+        async with self._db.session() as sess:  # type:ignore
+            repo = TenantMemberRepository(sess)
+            users = await repo.get_members_of_tenant(payload.tennant_id)
+            logger.info(f"users: {users}, tennant_id: {payload.tennant_id}")
+        return ok(users=[user.user_id for user in users])

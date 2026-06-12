@@ -12,6 +12,8 @@ from ..schemas.tenant import (
     MemberResponse,
     TenantCreate,
     TenantResponse,
+    TenantSettingsResponse,
+    TenantSettingsUpdate,
     TenantUpdate,
 )
 
@@ -144,6 +146,36 @@ def tenants_router(db: Any, events: XAuthEvents | None = None) -> APIRouter:
             await session.commit()
             await session.refresh(tenant)
             return tenant
+
+    @router.get("/{tenant_id}/settings", response_model=TenantSettingsResponse)
+    async def get_settings(
+        tenant_id: str,
+        payload: AuthPayload = Depends(get_current_user),
+    ) -> Any:
+        async with db.session() as session:
+            await _require_tenant_scope(session, payload, tenant_id)
+            repo = TenantRepository(session)
+            tenant = await repo.get(tenant_id)
+            if tenant is None:
+                raise HTTPException(status_code=404, detail="Tenant not found")
+            settings = json.loads(tenant.settings) if tenant.settings else {}
+            return {"tenant_id": tenant_id, "settings": settings}
+
+    @router.put("/{tenant_id}/settings", response_model=TenantSettingsResponse)
+    async def update_settings(
+        tenant_id: str,
+        body: TenantSettingsUpdate,
+        payload: AuthPayload = Depends(get_current_user),
+    ) -> Any:
+        async with db.session() as session:
+            await _require_tenant_scope(session, payload, tenant_id, owner_only=True)
+            repo = TenantRepository(session)
+            tenant = await repo.get(tenant_id)
+            if tenant is None:
+                raise HTTPException(status_code=404, detail="Tenant not found")
+            tenant.settings = json.dumps(body.settings)
+            await session.commit()
+            return {"tenant_id": tenant_id, "settings": body.settings}
 
     @router.delete("/{tenant_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_tenant(

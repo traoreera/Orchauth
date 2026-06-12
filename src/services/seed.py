@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,70 +16,134 @@ from .auth import get_pwd_context
 
 logger = logging.getLogger("xauth.seed")
 
-# ── Permissions à créer au démarrage ─────────────────────────────────────────
+# ── Catalogue de permissions ──────────────────────────────────────────────────
+#
+# tenant_grantable=True  → le propriétaire d'un tenant peut déléguer cette
+#                          permission à ses membres via l'UI RBAC.
+# group                  → regroupement affiché dans l'UI.
 
-PERMISSIONS: list[tuple[str, str]] = [
-    # Plugins
-    ("plugin:list", "Lister les plugins"),
-    ("plugin:read", "Lire un plugin"),
-    ("plugin:create", "Publier un plugin"),
-    ("plugin:update", "Modifier un plugin"),
-    ("plugin:delete", "Supprimer un plugin"),
-    ("plugin:approve", "Approuver un plugin"),
-    ("plugin:reject", "Rejeter un plugin"),
-    ("plugin:feature", "Mettre en avant un plugin"),
-    # Soumissions
-    ("submissions:list", "Lister les soumissions"),
-    ("submissions:read", "Lire une soumission"),
-    ("submissions:create", "Créer une soumission"),
-    ("submissions:review", "Réviser une soumission"),
-    ("submissions:approve", "Approuver une soumission"),
-    ("submissions:reject", "Rejeter une soumission"),
-    ("submissions:delete", "Supprimer une soumission"),
-    ("submissions:write", "Poster un nouveau plugin"),
-    # Évaluations
-    ("rating:create", "Créer une évaluation"),
-    ("rating:delete", "Supprimer une évaluation"),
-    # Utilisateurs
-    ("user:list", "Lister les utilisateurs"),
-    ("user:read", "Lire un utilisateur"),
-    ("user:update", "Modifier un utilisateur"),
-    ("user:delete", "Supprimer un utilisateur"),
-    ("user:ban", "Bannir un utilisateur"),
-    # Tenants
-    ("tenant:list", "Lister les tenants"),
-    ("tenant:read", "Lire un tenant"),
-    ("tenant:create", "Créer un tenant"),
-    ("tenant:update", "Modifier un tenant"),
-    ("tenant:delete", "Supprimer un tenant"),
-    ("tenants:read", "Lire les tenants (routes API)"),
-    ("tenants:write", "Modifier les tenants (routes API)"),
-    ("tenants:delete", "Supprimer les tenants (routes API)"),
-    # RBAC
-    ("role:list", "Lister les rôles"),
-    ("role:create", "Créer un rôle"),
-    ("role:update", "Modifier un rôle"),
-    ("role:delete", "Supprimer un rôle"),
-    ("permission:list", "Lister les permissions"),
-    ("permission:assign", "Assigner une permission"),
-    ("rbac:read", "Lire les rôles et permissions (routes API)"),
-    ("rbac:write", "Modifier les rôles et permissions (routes API)"),
-    # Audit
-    ("audit:read", "Lire les logs d'audit"),
-    # Invitations
-    ("invite:create", "Créer une invitation"),
-    ("invite:revoke", "Révoquer une invitation"),
-    ("invites:read", "Lire les invitations (routes API)"),
-    ("invites:write", "Gérer les invitations (routes API)"),
-    # Admin global
-    ("admin:*", "Accès administrateur complet"),
-    # xpulse
-    ("xpulse:publish", "Publier un message ciblé via xpulse"),
-    ("xpulse:broadcast", "Broadcaster un message à tous les users via xpulse"),
-    ("license:read", "Lire les licences"),
+
+@dataclass(frozen=True)
+class PermDef:
+    name: str
+    description: str
+    group: str
+    tenant_grantable: bool = False
+
+
+PERMISSIONS: list[PermDef] = [
+    # ── Plugins ───────────────────────────────────────────────────────────────
+    PermDef("plugin:list", "Lister les plugins", "Plugins", tenant_grantable=True),
+    PermDef("plugin:read", "Lire un plugin", "Plugins", tenant_grantable=True),
+    PermDef("plugin:create", "Publier un plugin", "Plugins"),
+    PermDef("plugin:update", "Modifier un plugin", "Plugins"),
+    PermDef("plugin:delete", "Supprimer un plugin", "Plugins"),
+    PermDef("plugin:approve", "Approuver un plugin", "Plugins"),
+    PermDef("plugin:reject", "Rejeter un plugin", "Plugins"),
+    PermDef("plugin:feature", "Mettre en avant un plugin", "Plugins"),
+    # ── Soumissions ───────────────────────────────────────────────────────────
+    PermDef(
+        "submissions:list",
+        "Lister les soumissions",
+        "Soumissions",
+        tenant_grantable=True,
+    ),
+    PermDef(
+        "submissions:read", "Lire une soumission", "Soumissions", tenant_grantable=True
+    ),
+    PermDef(
+        "submissions:create",
+        "Créer une soumission",
+        "Soumissions",
+        tenant_grantable=True,
+    ),
+    PermDef(
+        "submissions:write",
+        "Poster un nouveau plugin",
+        "Soumissions",
+        tenant_grantable=True,
+    ),
+    PermDef("submissions:review", "Réviser une soumission", "Soumissions"),
+    PermDef("submissions:approve", "Approuver une soumission", "Soumissions"),
+    PermDef("submissions:reject", "Rejeter une soumission", "Soumissions"),
+    PermDef("submissions:delete", "Supprimer une soumission", "Soumissions"),
+    # ── Évaluations ───────────────────────────────────────────────────────────
+    PermDef(
+        "rating:create", "Créer une évaluation", "Évaluations", tenant_grantable=True
+    ),
+    PermDef("rating:delete", "Supprimer une évaluation", "Évaluations"),
+    # ── Utilisateurs ──────────────────────────────────────────────────────────
+    PermDef("user:list", "Lister les utilisateurs", "Utilisateurs"),
+    PermDef("user:read", "Lire un utilisateur", "Utilisateurs", tenant_grantable=True),
+    PermDef("user:update", "Modifier un utilisateur", "Utilisateurs"),
+    PermDef("user:delete", "Supprimer un utilisateur", "Utilisateurs"),
+    PermDef("user:ban", "Bannir un utilisateur", "Utilisateurs"),
+    # ── Tenants ───────────────────────────────────────────────────────────────
+    PermDef("tenant:list", "Lister les tenants", "Tenants"),
+    PermDef("tenant:read", "Lire un tenant", "Tenants"),
+    PermDef("tenant:create", "Créer un tenant", "Tenants"),
+    PermDef("tenant:update", "Modifier un tenant", "Tenants"),
+    PermDef("tenant:delete", "Supprimer un tenant", "Tenants"),
+    PermDef(
+        "tenants:read",
+        "Lire les tenants (routes API)",
+        "Tenants",
+        tenant_grantable=True,
+    ),
+    PermDef("tenants:write", "Modifier les tenants (routes API)", "Tenants"),
+    PermDef("tenants:delete", "Supprimer les tenants (routes API)", "Tenants"),
+    # ── RBAC ──────────────────────────────────────────────────────────────────
+    PermDef("role:list", "Lister les rôles", "RBAC"),
+    PermDef("role:create", "Créer un rôle", "RBAC"),
+    PermDef("role:update", "Modifier un rôle", "RBAC"),
+    PermDef("role:delete", "Supprimer un rôle", "RBAC"),
+    PermDef("permission:list", "Lister les permissions", "RBAC"),
+    PermDef("permission:assign", "Assigner une permission", "RBAC"),
+    PermDef(
+        "rbac:read",
+        "Lire les rôles et permissions (routes API)",
+        "RBAC",
+        tenant_grantable=True,
+    ),
+    PermDef("rbac:write", "Modifier les rôles et permissions (routes API)", "RBAC"),
+    # ── Audit ─────────────────────────────────────────────────────────────────
+    PermDef("audit:read", "Lire les logs d'audit", "Audit", tenant_grantable=True),
+    # ── Invitations ───────────────────────────────────────────────────────────
+    PermDef("invite:create", "Créer une invitation", "Invitations"),
+    PermDef("invite:revoke", "Révoquer une invitation", "Invitations"),
+    PermDef(
+        "invites:read",
+        "Lire les invitations (routes API)",
+        "Invitations",
+        tenant_grantable=True,
+    ),
+    PermDef(
+        "invites:write",
+        "Gérer les invitations (routes API)",
+        "Invitations",
+        tenant_grantable=True,
+    ),
+    # ── Licences ──────────────────────────────────────────────────────────────
+    PermDef("license:read", "Lire les licences", "Licences", tenant_grantable=True),
+    PermDef("license:write", "Modifier les licences", "Licences"),
+    PermDef("license:manage", "Gérer les licences", "Licences"),
+    # ── Notifications (xpulse) ────────────────────────────────────────────────
+    PermDef("xpulse:publish", "Publier un message ciblé via xpulse", "Notifications"),
+    PermDef(
+        "xpulse:broadcast", "Broadcaster un message à tous les users", "Notifications"
+    ),
+    # ── Administration plateforme ─────────────────────────────────────────────
+    PermDef(
+        "admin:*",
+        "Accès administrateur complet à toutes les ressources",
+        "Administration",
+    ),
 ]
 
-# Permissions accordées à tout utilisateur inscrit
+# ── Composition des rôles ─────────────────────────────────────────────────────
+# Déclaratif : la seed synchronise exactement ces listes (ajout ET retrait).
+
+# Permissions accordées à tout utilisateur inscrit.
 USER_PERMISSIONS: list[str] = [
     "plugin:list",
     "plugin:read",
@@ -90,9 +155,7 @@ USER_PERMISSIONS: list[str] = [
     "user:read",
 ]
 
-# Permissions du propriétaire/admin d'un tenant — gestion de SON tenant
-# uniquement. Surtout PAS admin:* (god-mode plateforme) ni les opérations
-# destructives globales (user:delete, tenants:delete, rbac:write…).
+# Propriétaire d'un tenant — gestion de SON tenant, pas de privilèges plateforme.
 TENANT_ADMIN_PERMISSIONS: list[str] = [
     "tenants:read",
     "tenants:write",
@@ -108,18 +171,70 @@ TENANT_ADMIN_PERMISSIONS: list[str] = [
 
 
 async def seed_permissions(session: AsyncSession) -> dict[str, Permission]:
+    """
+    Synchronise le catalogue avec PERMISSIONS.
+    Crée les nouvelles entrées ET met à jour description/group/tenant_grantable
+    sur les existantes. Idempotent.
+    """
     repo = PermissionRepository(session)
     result: dict[str, Permission] = {}
-    for name, desc in PERMISSIONS:
-        existing = await repo.get_by_name(name)
+    for pdef in PERMISSIONS:
+        existing = await repo.get_by_name(pdef.name)
         if existing is None:
-            perm = Permission(name=name, description=desc)
+            perm = Permission(
+                name=pdef.name,
+                description=pdef.description,
+                group=pdef.group,
+                tenant_grantable=pdef.tenant_grantable,
+                active=True,
+            )
             await repo.save(perm)
-            result[name] = perm
-            logger.debug("Permission créée : %s", name)
+            result[pdef.name] = perm
+            logger.debug("Permission créée : %s", pdef.name)
         else:
-            result[name] = existing
+            changed = False
+            if existing.description != pdef.description:
+                existing.description = pdef.description
+                changed = True
+            if existing.group != pdef.group:
+                existing.group = pdef.group
+                changed = True
+            if existing.tenant_grantable != pdef.tenant_grantable:
+                existing.tenant_grantable = pdef.tenant_grantable
+                changed = True
+            if not existing.active:
+                existing.active = True
+                changed = True
+            if changed:
+                await repo.save(existing)
+                logger.debug("Permission mise à jour : %s", pdef.name)
+            result[pdef.name] = existing
     return result
+
+
+def _sync_role_permissions(
+    role: Role,
+    target_names: set[str],
+    catalogue: dict[str, Permission],
+) -> int:
+    """
+    Synchronise les permissions d'un rôle avec target_names (déclaratif).
+    Ajoute les manquantes, retire celles qui ne sont plus dans la liste.
+    Retourne le nombre de modifications effectuées.
+    """
+    current: dict[str, Permission] = {p.name: p for p in role.permissions}
+    delta = 0
+    for name in target_names:
+        if name not in current:
+            perm = catalogue.get(name)
+            if perm is not None:
+                role.permissions.append(perm)
+                delta += 1
+    for name, perm in list(current.items()):
+        if name not in target_names:
+            role.permissions.remove(perm)
+            delta += 1
+    return delta
 
 
 async def seed_default_tenant(session: AsyncSession, cfg: dict) -> Tenant:
@@ -154,11 +269,9 @@ async def seed_admin_role(
         logger.info("Rôle admin créé")
 
     admin_role = await role_repo.get_with_permissions(admin_role.id)
-    existing_perm_names = {p.name for p in admin_role.permissions}
-    for perm in permissions.values():
-        if perm.name not in existing_perm_names:
-            admin_role.permissions.append(perm)
-
+    delta = _sync_role_permissions(admin_role, set(permissions.keys()), permissions)
+    if delta:
+        logger.info("Rôle admin : %d permission(s) synchronisée(s)", delta)
     await session.flush()
     return admin_role
 
@@ -183,16 +296,12 @@ async def seed_user_role(
         await role_repo.save(user_role)
         logger.info("Rôle user créé")
 
-    user_role_loaded = await role_repo.get_with_permissions(user_role.id)
-    assert user_role_loaded is not None
-    existing_perm_names = {p.name for p in user_role_loaded.permissions}
-    for perm_name in USER_PERMISSIONS:
-        perm = permissions.get(perm_name)
-        if perm and perm.name not in existing_perm_names:
-            user_role_loaded.permissions.append(perm)
-
+    user_role = await role_repo.get_with_permissions(user_role.id)
+    delta = _sync_role_permissions(user_role, set(USER_PERMISSIONS), permissions)
+    if delta:
+        logger.info("Rôle user : %d permission(s) synchronisée(s)", delta)
     await session.flush()
-    return user_role_loaded
+    return user_role
 
 
 async def seed_tenant_admin_role(
@@ -218,12 +327,9 @@ async def seed_tenant_admin_role(
         logger.info("Rôle '%s' créé", role_name)
 
     role = await role_repo.get_with_permissions(role.id)
-    existing_perm_names = {p.name for p in role.permissions}
-    for perm_name in TENANT_ADMIN_PERMISSIONS:
-        perm = permissions.get(perm_name)
-        if perm and perm.name not in existing_perm_names:
-            role.permissions.append(perm)
-
+    delta = _sync_role_permissions(role, set(TENANT_ADMIN_PERMISSIONS), permissions)
+    if delta:
+        logger.info("Rôle tenant_admin : %d permission(s) synchronisée(s)", delta)
     await session.flush()
     return role
 

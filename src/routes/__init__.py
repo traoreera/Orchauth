@@ -6,6 +6,8 @@ from .invites import invites_router
 from .audit import audit_router
 from .oauth import oauth_router
 from .password import password_router
+from .account import account_router
+from .notifications import notifications_router
 
 __all__ = [
     "auth_router",
@@ -16,4 +18,6 @@ __all__ = [
     "audit_router",
     "oauth_router",
     "password_router",
+    "account_router",
+    "notifications_router",
 ]

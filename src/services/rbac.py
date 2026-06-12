@@ -22,7 +22,7 @@ _CACHE_KEY_TPL = "xauth:perms:{user_id}:{tenant_id}"
 # ── Contrat d'agrégation des grants plugins (event rbac.declare) ───────────────
 # Un plugin ne peut déclarer QUE dans son propre namespace, jamais un namespace
 # plateforme. C'est le verrou de sécurité de l'agrégation.
-RESERVED_NAMESPACES = {"admin", "rbac", "auth", "tenants", "user", "license"}
+RESERVED_NAMESPACES = {"admin", "rbac", "auth", "tenants", "user", "license", "plugins"}
 _GRANT_NAME_RE = re.compile(r"^[a-z0-9_]+:[a-z0-9_]+(:[a-z0-9_]+)*$")
 
 
@@ -176,17 +176,27 @@ class RBACService:
         return permissions
 
     async def get_roles_for_user(self, user_id: str, tenant_id: str) -> list[str]:
-        """Retourne les noms des rôles de l'utilisateur dans le tenant."""
+        """Retourne les noms des rôles de l'utilisateur dans le tenant (rôle primaire + multi-rôles)."""
         member_repo = TenantMemberRepository(self._session)
         membership = await member_repo.get_membership(user_id, tenant_id)
-        if membership is None or membership.role_id is None:
-            return []
-        role_repo = RoleRepository(self._session)
-        role = await role_repo.get(membership.role_id)
-        if role is None:
+        if membership is None:
             return []
 
-        return [role.name]
+        role_repo = RoleRepository(self._session)
+        names: list[str] = []
+
+        if membership.role_id:
+            role = await role_repo.get(membership.role_id)
+            if role is not None:
+                names.append(role.name)
+
+        mr_repo = MemberRoleRepository(self._session)
+        for mr in await mr_repo.list_for_member(user_id, tenant_id):
+            role = await role_repo.get(mr.role_id)
+            if role is not None and role.name not in names:
+                names.append(role.name)
+
+        return names
 
     async def has_permission(
         self, user_id: str, tenant_id: str, permission: str
@@ -207,8 +217,6 @@ class RBACService:
     async def reconcile_plugin_grants(
         self, plugin: str, grants: list[dict]
     ) -> dict[str, int]:
-        import rich
-
         """Synchronise le catalogue avec les grants déclarés par un plugin.
 
         Déclaratif & idempotent : `grants` = état complet du plugin. Upsert des
@@ -220,7 +228,6 @@ class RBACService:
             name = (g or {}).get("name")
             if _is_valid_grant(plugin, name):
                 desired[name] = g
-            rich.print({"name": name, "valid": _is_valid_grant(plugin, name)}, g)
 
         upserted = 0
         for name, g in desired.items():
@@ -232,10 +239,8 @@ class RBACService:
             perm.tenant_grantable = bool(g.get("tenant_grantable", False))
             perm.source_plugin = plugin
             perm.active = True
-            obj = await perm_repo.save(perm)
+            await perm_repo.save(perm)
             upserted += 1
-
-            rich.print(obj.__dict__)
         disabled = 0
         for perm in await perm_repo.list_by_plugin(plugin):
             if perm.name not in desired and perm.active:

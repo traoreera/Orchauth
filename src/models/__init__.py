@@ -12,6 +12,7 @@ from .session import Session
 from .invite import Invite
 from .audit import AuditLog
 from .oauth import OAuthAccount
+from .notification import Notification
 
 __all__ = [
     "Base",
@@ -27,4 +28,5 @@ __all__ = [
     "Invite",
     "AuditLog",
     "OAuthAccount",
+    "Notification",
 ]
