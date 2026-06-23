@@ -1,6 +1,6 @@
 
 from alembic import context
-from app.xauth.src.models import Base
+from app.Orchauth.src.models import Base
 
 target_metadata = Base.metadata
 
