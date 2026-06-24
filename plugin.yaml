@@ -77,6 +77,96 @@ env:
   OAUTH_MICROSOFT_CLIENT_ID: "${XAUTH_OAUTH_MICROSOFT_CLIENT_ID}"
   OAUTH_MICROSOFT_CLIENT_SECRET: "${XAUTH_OAUTH_MICROSOFT_CLIENT_SECRET}"
 
+# ── Événements émis ──────────────────────────────────────────────────────────
+events_emitted:
+  xauth.auth.registered:
+    description: "Utilisateur inscrit avec succès"
+    payload_schema:
+      user_id: string
+      email: string
+      tenant_id: string
+  xauth.auth.login:
+    description: "Connexion réussie"
+    payload_schema:
+      user_id: string
+      email: string
+      ip: string
+      tenant_id: string
+  xauth.auth.login_failed:
+    description: "Tentative de connexion échouée"
+    payload_schema:
+      email: string
+      ip: string
+      reason: string
+  xauth.auth.logout:
+    description: "Déconnexion utilisateur"
+    payload_schema:
+      user_id: string
+  xauth.auth.session_refreshed:
+    description: "Session JWT rafraîchie"
+    payload_schema:
+      user_id: string
+      tenant_id: string
+  xauth.password.reset_requested:
+    description: "Demande de réinitialisation de mot de passe"
+    payload_schema:
+      email: string
+  xauth.password.reset_completed:
+    description: "Réinitialisation de mot de passe effectuée"
+    payload_schema:
+      email: string
+  xauth.password.changed:
+    description: "Mot de passe modifié par l'utilisateur"
+    payload_schema:
+      user_id: string
+  xauth.password.set:
+    description: "Mot de passe défini (première fois)"
+    payload_schema:
+      user_id: string
+  xauth.oauth.login:
+    description: "Connexion via OAuth"
+    payload_schema:
+      user_id: string
+      provider: string
+      is_new_user: boolean
+  xauth.oauth.linked:
+    description: "Compte OAuth lié à un compte existant"
+    payload_schema:
+      user_id: string
+      provider: string
+  xauth.oauth.unlinked:
+    description: "Compte OAuth délié"
+    payload_schema:
+      user_id: string
+      provider: string
+  xauth.invite.created:
+    description: "Invitation créée et envoyée"
+    payload_schema:
+      invite_id: string
+      email: string
+      tenant_id: string
+      invited_by: string
+  xauth.invite.accepted:
+    description: "Invitation acceptée"
+    payload_schema:
+      invite_id: string
+      user_id: string
+      tenant_id: string
+  xauth.tenant.created:
+    description: "Nouveau tenant créé"
+    payload_schema:
+      tenant_id: string
+      owner_id: string
+      slug: string
+  xauth.mfa.enabled:
+    description: "MFA TOTP activé"
+    payload_schema:
+      user_id: string
+  xauth.mfa.disabled:
+    description: "MFA TOTP désactivé"
+    payload_schema:
+      user_id: string
+
 # ── Permissions inter-plugins ─────────────────────────────────────────────────
 permissions:
   - resource: "registry"
