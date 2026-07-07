@@ -2,74 +2,47 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter
 from xcore.kernel.api import (
-    AuthPayload,
-    get_current_user,
     register_auth_backend,
     unregister_auth_backend,
 )
-from xcore.sdk import AutoDispatchMixin, TrustedBase
+from xcore.sdk import AutoDispatchMixin, TrustedBase, get_logger
 
 from .backend import XAuthBackend
 from .ipc import IPCCommands
 from .models import Base
-from .providers import (
-    DiscordProvider,
-    GitHubProvider,
-    GoogleProvider,
-    MicrosoftProvider,
-)
-from .providers.base import OAuthProvider
+from .providers._factory import build_oauth_providers
 from .routes import (
     account_router,
     audit_router,
+    auth_router,
     invites_router,
     mfa_router,
     notifications_router,
     oauth_router,
     password_router,
     rbac_router,
+    sessions_router,
     tenants_router,
 )
 from .routes.admin import admin_router
-from .routes.sessions import sessions_router
-from .schemas.auth import (
-    LoginRequest,
-    LogoutRequest,
-    RefreshRequest,
-    RegisterRequest,
-    SelectTenantRequest,
-    SetupCreateRequest,
-    SetupJoinRequest,
-    TokenResponse,
-    UserResponse,
-)
-from .services.auth import AuthService
 from .services.email import AuthEmailService
 from .services.events import XAuthEvents
-from .services.rbac import RBACService
-from .services.seed import run_seed
+from .services.rbac import PluginGrantService
+from .services.seed import build_seed_cfg, run_seed
 from .services.token import TokenService
-from .utils.rate_limit import RateLimiter
+
+logger = get_logger('auth')
 
 
 class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
-    """
-    XAuth Plugin — enterprise auth multi-tenant avec RBAC, audit log, invitations.
-    Enregistre un AuthBackend global au boot : tous les autres plugins peuvent utiliser
-    require_permission() / get_current_user() de xcore.sdk sans dépendre de xauth.
-    """
 
     async def _initialize_tables(self, db) -> None:
-        import logging as _log
-
         from xcore.services.database.migrations import MigrationRunner
-
-        _logger = _log.getLogger("hub.xauth")
         async with db.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        _logger.info("[xauth] Tables créées / vérifiées")
+        logger.info("[xauth] Tables created / verified")
         _migrations_dir = Path(__file__).parent.parent / "migrations"
         runner = MigrationRunner(
             db_url=str(db.engine.url), migrations_dir=_migrations_dir
@@ -78,13 +51,13 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
             await runner.init(autogenerate=False, message="first_initialisation")
             await runner.upgrade()
         except Exception as exc:
-            _logger.warning("[xauth] Migration upgrade ignorée : %s", exc)
+            logger.warning("[xauth] Migration upgrade skipped: %s", exc)
 
     async def on_load(self) -> None:
         self.app = APIRouter()
 
-        env = self.ctx.env  # type: ignore  — vars d'env résolues (secrets)
-        cfg = self.ctx.config  # type: ignore  — sections extra de plugin.yaml
+        env = self.ctx.env
+        cfg = self.ctx.config
 
         db = self.get_service("db")
         cache = self.get_service("cache")
@@ -94,30 +67,17 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
         self._db = db
         self._cache = cache
 
-        # ── Résolution config : plugin.yaml > env vars ──────────────────────
         app_cfg = cfg.get("app", {})
         jwt_cfg = cfg.get("jwt", {})
 
         app_name = env.get("APP_NAME") or app_cfg.get("name", "XAuth")
-        app_base_url = env.get("APP_BASE_URL") or app_cfg.get(
-            "base_url", "http://localhost:8000"
-        )
+        app_base_url = env.get("APP_BASE_URL") or app_cfg.get("base_url", "http://localhost:8000")
 
-        private_key = env.get("JWT_PRIVATE_KEY_PATH") or jwt_cfg.get(
-            "private_key_path", "conf/private.pem"
-        )
-        public_key = env.get("JWT_PUBLIC_KEY_PATH") or jwt_cfg.get(
-            "public_key_path", "conf/public.pem"
-        )
-        access_exp = int(
-            env.get("JWT_ACCESS_EXPIRE_MINUTES")
-            or jwt_cfg.get("access_expire_minutes", 15)
-        )
-        refresh_exp = int(
-            env.get("JWT_REFRESH_EXPIRE_DAYS") or jwt_cfg.get("refresh_expire_days", 7)
-        )
+        private_key = env.get("JWT_PRIVATE_KEY_PATH") or jwt_cfg.get("private_key_path", "conf/private.pem")
+        public_key = env.get("JWT_PUBLIC_KEY_PATH") or jwt_cfg.get("public_key_path", "conf/public.pem")
+        access_exp = int(env.get("JWT_ACCESS_EXPIRE_MINUTES") or jwt_cfg.get("access_expire_minutes", 15))
+        refresh_exp = int(env.get("JWT_REFRESH_EXPIRE_DAYS") or jwt_cfg.get("refresh_expire_days", 7))
 
-        # ── Services ────────────────────────────────────────────────────────
         self._token_service = TokenService(
             private_key_path=private_key,
             public_key_path=public_key,
@@ -138,26 +98,17 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
 
         self._events = XAuthEvents(self.ctx.events)
 
-        oauth_providers = _build_oauth_providers(env, app_base_url)
+        oauth_providers = build_oauth_providers(env, app_base_url)
 
         seed_cfg = cfg.get("seed", {})
-        user_role_name = env.get("USER_ROLE_NAME") or seed_cfg.get(
-            "user_role_name", "user"
-        )
-        admin_role_name = env.get("ADMIN_ROLE_NAME") or seed_cfg.get(
-            "admin_role_name", "admin"
-        )
+        user_role_name = env.get("USER_ROLE_NAME") or seed_cfg.get("user_role_name", "user")
+        admin_role_name = env.get("ADMIN_ROLE_NAME") or seed_cfg.get("admin_role_name", "admin")
+        self._admin_role_name = admin_role_name
 
-        # ── Routes ──────────────────────────────────────────────────────────
         self.app.include_router(
-            _auth_router_with_db(
-                db,
-                self._token_service,
-                self._email_service,
-                self._events,
-                cache,
-                user_role_name=user_role_name,
-                admin_role_name=admin_role_name,
+            auth_router(
+                db, self._token_service, self._email_service, self._events,
+                cache, user_role_name=user_role_name, admin_role_name=admin_role_name,
             )
         )
         self.app.include_router(tenants_router(db, self._events))
@@ -165,55 +116,54 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
         self.app.include_router(mfa_router(db, self._token_service))
         self.app.include_router(invites_router(db, self._email_service, self._events))
         self.app.include_router(audit_router(db))
-        self.app.include_router(
-            oauth_router(db, cache, self._token_service, oauth_providers)
-        )
-        self.app.include_router(
-            password_router(db, cache, self._email_service, self._events)
-        )
+        self.app.include_router(oauth_router(db, cache, self._token_service, oauth_providers))
+        self.app.include_router(password_router(db, cache, self._email_service, self._events))
         self.app.include_router(sessions_router(db, self._token_service, cache=cache))
         self.app.include_router(account_router(db))
         self.app.include_router(notifications_router(db))
-        self.app.include_router(
-            admin_router(db, cache=cache, token_service=self._token_service)
-        )
+        self.app.include_router(admin_router(db, cache=cache, token_service=self._token_service))
 
-        # ── Seed ────────────────────────────────────────────────────────────
-        from .services.seed import run_seed
-
-        await run_seed(db, cfg=_build_seed_cfg(cfg.get("seed", {}), env))
-
-        # ── Agrégation RBAC : écoute les déclarations des plugins ────────────
-        # Garanti par `requires: auth` côté plugins → l'auth (et donc ces
-        # listeners) est up avant qu'un plugin RBAC n'émette `rbac.declare`.
+        await run_seed(db, cfg=build_seed_cfg(cfg.get("seed", {}), env))
         self._register_rbac_listeners()
 
     def _register_rbac_listeners(self) -> None:
-        events = self.ctx.events  # type: ignore
+        events = self.ctx.events
         db = self._db
-        cache = self._cache
+        admin_role_name = self._admin_role_name
 
         @events.on("rbac.declare")
         async def _on_rbac_declare(event):
+            from .repositories.rbac import RoleRepository, PermissionRepository
             data = event.data or {}
             plugin = data.get("plugin")
             if not plugin:
                 return
             async with db.session() as session:
-                svc = RBACService(session, cache=cache)
+                svc = PluginGrantService(session)
                 await svc.reconcile_plugin_grants(plugin, data.get("grants", []))
 
+                role_repo = RoleRepository(session)
+                perm_repo = PermissionRepository(session)
+                admin_role = await role_repo.get_by_name(admin_role_name)
+                if admin_role:
+                    plugin_perms = await perm_repo.list_by_plugin(plugin)
+                    changed = False
+                    for perm in plugin_perms:
+                        if perm.active and perm not in admin_role.permissions:
+                            admin_role.permissions.append(perm)
+                            changed = True
+                    if changed:
+                        await session.flush()
                 await session.commit()
 
         @events.on("plugin.*.unloaded")
         async def _on_plugin_unloaded(event):
-            # event.name = "plugin.<name>.unloaded"
             parts = (event.name or "").split(".")
             if len(parts) < 3:
                 return
             plugin = parts[1]
             async with db.session() as session:
-                svc = RBACService(session, cache=cache)
+                svc = PluginGrantService(session)
                 await svc.disable_plugin(plugin)
                 await session.commit()
 
@@ -222,292 +172,3 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
 
     def get_router(self) -> APIRouter | None:
         return self.app
-
-
-def _build_seed_cfg(seed_yaml: dict, env: dict) -> dict:
-    """
-    Construit le dict de config seed.
-    Priorité : env vars > section seed: de plugin.yaml.
-    Lève RuntimeError si une clé requise est absente des deux sources.
-    """
-    fields = {
-        "ADMIN_EMAIL": "admin_email",
-        "ADMIN_PASSWORD": "admin_password",
-        "ADMIN_TENANT_SLUG": "admin_tenant_slug",
-        "ADMIN_TENANT_NAME": "admin_tenant_name",
-        "ADMIN_ROLE_NAME": "admin_role_name",
-        "USER_ROLE_NAME": "user_role_name",
-    }
-    result: dict = {}
-    missing: list[str] = []
-    for env_key, yaml_key in fields.items():
-        value = env.get(env_key) or seed_yaml.get(yaml_key)
-        if not value:
-            missing.append(f"seed.{yaml_key}")
-        else:
-            result[env_key] = value
-    if missing:
-        raise RuntimeError(
-            "[xauth] Configuration seed incomplète — champs manquants dans plugin.yaml : "
-            + ", ".join(missing)
-        )
-    return result
-
-
-def _auth_router_with_db(
-    db,
-    token_service: TokenService,
-    email_service: AuthEmailService,
-    events: XAuthEvents | None = None,
-    cache=None,
-    user_role_name: str = "user",
-    admin_role_name: str = "admin",
-) -> APIRouter:
-    router = APIRouter(tags=["auth"])
-
-    _rl_login    = RateLimiter(cache, max_calls=10, period=60).for_route("login")
-    _rl_register = RateLimiter(cache, max_calls=5,  period=60).for_route("register")
-    _rl_refresh  = RateLimiter(cache, max_calls=30, period=60).for_route("refresh")
-
-    def _extract_ip(request: Request) -> str:
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
-
-    @router.post(
-        "/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED
-    )
-    async def register(body: RegisterRequest, _rl: None = Depends(_rl_register)):
-        async with db.session() as session:
-            svc = AuthService(
-                session,
-                token_service,
-                events,
-                cache=cache,
-                user_role_name=user_role_name,
-                admin_role_name=admin_role_name,
-            )
-            try:
-                user = await svc.register(
-                    email=body.email,
-                    password=body.password,
-                )
-                await session.commit()
-                await session.refresh(user)
-                email_service.auth.queue_template(
-                    to=user.email,
-                    subject=f"Bienvenue sur {email_service.auth.app_name}",
-                    template="welcome",
-                    context={
-                        "username": user.email,
-                        "login_url": f"{email_service.auth.base_url}/login",
-                    },
-                )
-                return user
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc))
-
-    @router.post("/login", response_model=TokenResponse)
-    async def login(body: LoginRequest, request: Request, _rl: None = Depends(_rl_login)):
-        ip = _extract_ip(request)
-        async with db.session() as session:
-            svc = AuthService(
-                session,
-                token_service,
-                events,
-                cache=cache,
-                user_role_name=user_role_name,
-                admin_role_name=admin_role_name,
-            )
-            try:
-                result = await svc.login(
-                    email=body.email,
-                    password=body.password,
-                    tenant_id=body.tenant_id,
-                    ip_address=ip,
-                )
-                await session.commit()
-                return result
-            except ValueError as exc:
-                raise HTTPException(status_code=401, detail=str(exc))
-
-    @router.post("/refresh", response_model=TokenResponse)
-    async def refresh(body: RefreshRequest, request: Request, _rl: None = Depends(_rl_refresh)):
-        ip = _extract_ip(request)
-        async with db.session() as session:
-            svc = AuthService(
-                session,
-                token_service,
-                events,
-                cache=cache,
-                user_role_name=user_role_name,
-                admin_role_name=admin_role_name,
-            )
-            try:
-                result = await svc.refresh(
-                    refresh_token=body.refresh_token, ip_address=ip
-                )
-                await session.commit()
-                return result
-            except ValueError as exc:
-                raise HTTPException(status_code=401, detail=str(exc))
-
-    @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-    async def logout(body: LogoutRequest):
-        async with db.session() as session:
-            svc = AuthService(
-                session,
-                token_service,
-                events,
-                cache=cache,
-                user_role_name=user_role_name,
-                admin_role_name=admin_role_name,
-            )
-            await svc.logout(body.refresh_token)
-            await session.commit()
-
-    @router.post("/setup/create", response_model=TokenResponse)
-    async def setup_create(body: SetupCreateRequest, request: Request):
-        """
-        Crée un nouveau tenant et y rattache l'utilisateur comme owner.
-        À appeler après un login qui retourne onboarding_required=true.
-        """
-        ip = _extract_ip(request)
-        async with db.session() as session:
-            svc = AuthService(
-                session,
-                token_service,
-                events,
-                cache=cache,
-                user_role_name=user_role_name,
-                admin_role_name=admin_role_name,
-            )
-            try:
-                result = await svc.setup_create_tenant(
-                    refresh_token=body.refresh_token,
-                    name=body.name,
-                    slug=body.slug,
-                    ip_address=ip,
-                )
-                await session.commit()
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc))
-
-        # Emission APRÈS commit (hors du `async with session`) pour éviter
-        # que le handler xlicense ne bute sur un verrou DB (sqlite single-writer)
-        if events and result.get("tenant_id"):
-            await events.tenant_created(
-                result["tenant_id"], result["user_id"], body.slug
-            )
-        return result
-
-    @router.post("/setup/join", response_model=TokenResponse)
-    async def setup_join(body: SetupJoinRequest, request: Request):
-        """
-        Rejoint un tenant existant via un token d'invitation.
-        À appeler après un login qui retourne onboarding_required=true.
-        """
-        ip = _extract_ip(request)
-        async with db.session() as session:
-            svc = AuthService(
-                session,
-                token_service,
-                events,
-                cache=cache,
-                user_role_name=user_role_name,
-                admin_role_name=admin_role_name,
-            )
-            try:
-                result = await svc.setup_join_tenant(
-                    refresh_token=body.refresh_token,
-                    invite_token=body.invite_token,
-                    ip_address=ip,
-                )
-                await session.commit()
-                return result
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc))
-
-    @router.post("/select-tenant", response_model=TokenResponse)
-    async def select_tenant(body: SelectTenantRequest, request: Request):
-        ip = _extract_ip(request)
-        async with db.session() as session:
-            svc = AuthService(
-                session,
-                token_service,
-                events,
-                cache=cache,
-                user_role_name=user_role_name,
-                admin_role_name=admin_role_name,
-            )
-            try:
-                result = await svc.select_tenant(
-                    refresh_token=body.refresh_token,
-                    tenant_id=body.tenant_id,
-                    ip_address=ip,
-                )
-                await session.commit()
-                return result
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc))
-
-    @router.get("/me", response_model=UserResponse)
-    async def me(current_user: AuthPayload = Depends(get_current_user)):
-        from .repositories.user import UserRepository  # évite l'import circulaire
-
-        async with db.session() as session:
-            repo = UserRepository(session)
-            user = await repo.get(current_user["sub"])
-            if user is None:
-                raise HTTPException(status_code=404, detail="User not found")
-            return user
-
-    return router
-
-
-def _build_oauth_providers(
-    env: dict, base_url: str = "http://localhost:8000"
-) -> dict[str, OAuthProvider]:
-    """
-    Construit le dict provider_name → instance à partir des vars d'env.
-    Un provider est activé seulement si client_id et client_secret sont présents.
-    """
-    base_url = base_url.rstrip("/")
-    providers: dict[str, OAuthProvider] = {}
-
-    _registry = [
-        (
-            "google",
-            GoogleProvider,
-            "OAUTH_GOOGLE_CLIENT_ID",
-            "OAUTH_GOOGLE_CLIENT_SECRET",
-        ),
-        (
-            "github",
-            GitHubProvider,
-            "OAUTH_GITHUB_CLIENT_ID",
-            "OAUTH_GITHUB_CLIENT_SECRET",
-        ),
-        (
-            "discord",
-            DiscordProvider,
-            "OAUTH_DISCORD_CLIENT_ID",
-            "OAUTH_DISCORD_CLIENT_SECRET",
-        ),
-        (
-            "microsoft",
-            MicrosoftProvider,
-            "OAUTH_MICROSOFT_CLIENT_ID",
-            "OAUTH_MICROSOFT_CLIENT_SECRET",
-        ),
-    ]
-
-    for name, cls, id_key, secret_key in _registry:
-        client_id = env.get(id_key, "")
-        client_secret = env.get(secret_key, "")
-        if client_id and client_secret:
-            redirect_uri = f"{base_url}/app/auth/oauth/{name}/callback"
-            providers[name] = cls(client_id, client_secret, redirect_uri)
-
-    return providers

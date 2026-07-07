@@ -8,7 +8,9 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from jose import JWTError, jwt
+from xcore.sdk import get_logger
 
+logger = get_logger("xauth.token")
 ALGORITHM = "RS256"
 
 
@@ -29,6 +31,14 @@ class TokenService:
         self._public_key = Path(public_key_path).read_text()
         self._access_expire = access_expire_minutes
         self._refresh_expire = refresh_expire_days
+
+    @property
+    def access_expire(self) -> int:
+        return self._access_expire
+
+    @property
+    def refresh_expire(self) -> int:
+        return self._refresh_expire
 
     def create_access_token(
         self,
@@ -68,9 +78,12 @@ class TokenService:
         try:
             payload = jwt.decode(token, self._public_key, algorithms=[ALGORITHM])
         except JWTError as exc:
-            raise ValueError(f"Token invalide : {exc}") from exc
+            logger.warning("Access token verification failed: %s", exc)
+            raise ValueError(f"Invalid token: {exc}") from exc
         if payload.get("type") != "access":
-            raise ValueError("Ce token n'est pas un access token")
+            logger.warning("Token type mismatch: expected 'access', got '%s'", payload.get("type"))
+            raise ValueError("Not an access token")
+        logger.debug("Access token verified for user %s", payload.get("sub"))
         return payload
 
     def create_mfa_challenge_token(
@@ -92,7 +105,10 @@ class TokenService:
         try:
             payload = jwt.decode(token, self._public_key, algorithms=[ALGORITHM])
         except JWTError as exc:
-            raise ValueError(f"Token invalide : {exc}") from exc
+            logger.warning("MFA challenge token verification failed: %s", exc)
+            raise ValueError(f"Invalid MFA challenge token: {exc}") from exc
         if payload.get("type") != "mfa_challenge":
-            raise ValueError("Ce token n'est pas un challenge MFA")
+            logger.warning("Token type mismatch: expected 'mfa_challenge', got '%s'", payload.get("type"))
+            raise ValueError("Not an MFA challenge token")
+        logger.debug("MFA challenge token verified for user %s", payload.get("sub"))
         return payload

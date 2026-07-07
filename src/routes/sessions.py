@@ -7,8 +7,9 @@ from pydantic import BaseModel
 from xcore.kernel.api import AuthPayload, get_current_user
 
 from ..repositories.session import SessionRepository
-from ..services.auth import AuthService
+from ..services.auth import AuthenticationService
 from ..services.token import TokenService
+from ..utils.http import get_client_ip
 
 
 class SessionResponse(BaseModel):
@@ -31,12 +32,6 @@ class VerifyMFARequest(BaseModel):
 def sessions_router(db: Any, token_service: TokenService, cache: Any = None) -> APIRouter:
     router = APIRouter(tags=["sessions"])
 
-    def _extract_ip(request: Request) -> str:
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
-
     @router.post("/auth/verify-mfa")
     async def verify_mfa(body: VerifyMFARequest, request: Request) -> Any:
         """
@@ -44,9 +39,9 @@ def sessions_router(db: Any, token_service: TokenService, cache: Any = None) -> 
         Vérifie le challenge JWT (mfa_token, 5 min) + code TOTP.
         Crée la session réelle et retourne les tokens définitifs.
         """
-        ip = _extract_ip(request)
+        ip = get_client_ip(request)
         async with db.session() as session:
-            svc = AuthService(session, token_service, cache=cache)
+            svc = AuthenticationService(session, token_service, cache=cache)
             try:
                 result = await svc.verify_mfa_and_issue_token(
                     mfa_token=body.mfa_token,
@@ -94,7 +89,7 @@ def sessions_router(db: Any, token_service: TokenService, cache: Any = None) -> 
 
             # Blacklister le JTI si présent
             if cache and target.last_jti:
-                ttl = token_service._access_expire * 60 + 30
+                ttl = token_service.access_expire * 60 + 30
                 await cache.set(f"xauth:jti_bl:{target.last_jti}", "1", ttl=ttl)
 
             target.is_revoked = True
@@ -111,7 +106,7 @@ def sessions_router(db: Any, token_service: TokenService, cache: Any = None) -> 
 
             for s in sessions:
                 if cache and s.last_jti:
-                    ttl = token_service._access_expire * 60 + 30
+                    ttl = token_service.access_expire * 60 + 30
                     await cache.set(f"xauth:jti_bl:{s.last_jti}", "1", ttl=ttl)
 
             await repo.revoke_all_for_user(current_user["sub"])

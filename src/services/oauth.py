@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
-import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-_logger = logging.getLogger(__name__)
+
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -161,13 +160,12 @@ class OAuthService:
             tenant_id: Optional[str] = forced_tenant_id
         elif not memberships:
             # Aucun tenant — demander au client de créer ou rejoindre
-            xauth_session = Session(
+            xauth_session = Session.build(
                 user_id=user.id,
-                tenant_id=None,
                 refresh_token=refresh_hashed,
                 ip_address=ip_address,
                 expires_at=datetime.now(tz=timezone.utc)
-                + timedelta(days=self._token._refresh_expire),
+                + timedelta(days=self._token.refresh_expire),
             )
             await session_repo.save(xauth_session)
             return {
@@ -196,13 +194,12 @@ class OAuthService:
                     "role_id": m.role_id,
                     "is_owner": m.is_owner,
                 })
-            xauth_session = Session(
+            xauth_session = Session.build(
                 user_id=user.id,
-                tenant_id=None,
                 refresh_token=refresh_hashed,
                 ip_address=ip_address,
                 expires_at=datetime.now(tz=timezone.utc)
-                + timedelta(days=self._token._refresh_expire),
+                + timedelta(days=self._token.refresh_expire),
             )
             await session_repo.save(xauth_session)
             return {
@@ -221,13 +218,13 @@ class OAuthService:
         access_jwt, jti = self._token.create_access_token(
             user_id=user.id, tenant_id=tenant_id
         )
-        xauth_session = Session(
+        xauth_session = Session.build(
             user_id=user.id,
             tenant_id=tenant_id,
             refresh_token=refresh_hashed,
             ip_address=ip_address,
             expires_at=datetime.now(tz=timezone.utc)
-            + timedelta(days=self._token._refresh_expire),
+            + timedelta(days=self._token.refresh_expire),
             last_jti=jti,
         )
         await session_repo.save(xauth_session)

@@ -32,8 +32,7 @@ class TenantResponse(BaseModel):
     is_owner: bool = False
     license_state: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class MemberResponse(BaseModel):
@@ -45,5 +44,4 @@ class MemberResponse(BaseModel):
     is_owner: bool
     email: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}

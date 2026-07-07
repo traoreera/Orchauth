@@ -92,7 +92,7 @@ def admin_router(db: Any, cache: Any = None, token_service: Any = None) -> APIRo
                     sessions = await session_repo.get_active_sessions_for_user(user_id)
                     for s in sessions:
                         if cache and s.last_jti and token_service:
-                            ttl = token_service._access_expire * 60 + 30
+                            ttl = token_service.access_expire * 60 + 30
                             await cache.set(f"xauth:jti_bl:{s.last_jti}", "1", ttl=ttl)
                     await session_repo.revoke_all_for_user(user_id)
 

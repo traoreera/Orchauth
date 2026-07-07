@@ -40,8 +40,7 @@ class PermissionResponse(BaseModel):
     group: Optional[str] = None
     active: bool = True
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class RoleResponse(BaseModel):
@@ -51,5 +50,4 @@ class RoleResponse(BaseModel):
     description: Optional[str]
     permissions: List[PermissionResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}

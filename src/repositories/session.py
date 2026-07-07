@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from ..models.session import Session
 from .base import BaseRepository
@@ -14,8 +15,9 @@ class SessionRepository(BaseRepository[Session]):
     async def get_by_refresh_token(self, hashed_token: str) -> Optional[Session]:
         result = await self.session.execute(
             select(Session)
+            .options(selectinload(Session.user))
             .where(Session.refresh_token == hashed_token)
-            .where(Session.is_revoked == False)  # noqa: E712
+            .where(Session.is_revoked.is_(False))
         )
         return result.scalar_one_or_none()
 
@@ -23,7 +25,7 @@ class SessionRepository(BaseRepository[Session]):
         result = await self.session.execute(
             select(Session)
             .where(Session.user_id == user_id)
-            .where(Session.is_revoked == False)  # noqa: E712
+            .where(Session.is_revoked.is_(False))
         )
         return list(result.scalars().all())
 

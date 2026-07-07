@@ -30,7 +30,7 @@ class NotificationRepository(BaseRepository[Notification]):
     async def mark_all_read(self, user_id: str) -> int:
         result = await self.session.execute(
             update(Notification)
-            .where(Notification.user_id == user_id, Notification.is_read == False)  # noqa: E712
+            .where(Notification.user_id == user_id, Notification.is_read.is_(False))
             .values(is_read=True)
         )
         return result.rowcount

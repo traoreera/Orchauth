@@ -7,7 +7,7 @@ from pydantic import BaseModel, EmailStr
 from xcore.kernel.api import AuthPayload, get_current_user
 
 from ..repositories.user import UserRepository
-from ..services.auth import get_pwd_context
+from ..services.auth.password import get_pwd_context
 
 
 class ChangeEmailRequest(BaseModel):

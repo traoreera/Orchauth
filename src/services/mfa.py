@@ -6,6 +6,9 @@ import secrets
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from xcore.sdk import get_logger
+
+logger = get_logger("xauth.mfa")
 
 from ..repositories.user import UserRepository
 
@@ -44,6 +47,7 @@ class MFAService:
         user.mfa_secret = secret
         user.mfa_backup_codes = json.dumps(backup_codes_hashed)
         await self._session.flush()
+        logger.info("MFA TOTP setup initiated for user %s", user_id)
 
         totp = pyotp.TOTP(secret)
         uri = totp.provisioning_uri(name=user.email, issuer_name="xauth")
@@ -111,6 +115,7 @@ class MFAService:
         codes_plain = self._generate_backup_codes()
         user.mfa_backup_codes = json.dumps([_hash_backup_code(c) for c in codes_plain])
         await self._session.flush()
+        logger.info("MFA backup codes regenerated for user %s", user_id)
         return codes_plain
 
     async def enable_mfa(self, user_id: str, code: str) -> bool:
@@ -124,6 +129,7 @@ class MFAService:
         if user:
             user.mfa_enabled = True
             await self._session.flush()
+        logger.info("MFA enabled for user %s", user_id)
         return True
 
     async def disable_mfa(self, user_id: str) -> None:
@@ -134,3 +140,4 @@ class MFAService:
             user.mfa_secret = None
             user.mfa_backup_codes = None
             await self._session.flush()
+            logger.info("MFA disabled for user %s", user_id)

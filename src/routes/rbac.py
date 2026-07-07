@@ -5,7 +5,11 @@ from xcore.kernel.api import AuthPayload, get_current_user
 from xcore.sdk import require_permission
 
 from ..repositories.user import TenantMemberRepository
-from ..services.rbac import RBACService
+from ..services.rbac import (
+    MemberRoleService,
+    PermissionService,
+    RoleService,
+)
 from ..schemas.rbac import (
     AssignPermissionRequest,
     AssignRoleRequest,
@@ -20,9 +24,6 @@ from ..schemas.rbac import (
 
 def rbac_router(db: Any, cache: Any = None) -> APIRouter:
     router = APIRouter(prefix="/rbac", tags=["rbac"])
-
-    def _svc(session) -> RBACService:
-        return RBACService(session, cache=cache)
 
     async def _require_tenant_admin(
         tenant_id: str, user: AuthPayload
@@ -54,7 +55,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         _: AuthPayload = Depends(require_permission("rbac:write")),
     ) -> Any:
         async with db.session() as session:
-            svc = _svc(session)
+            svc = RoleService(session, cache=cache)
             role = await svc.create_role(
                 name=body.name,
                 tenant_id=body.tenant_id,
@@ -70,7 +71,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         _: AuthPayload = Depends(require_permission("rbac:read")),
     ) -> Any:
         async with db.session() as session:
-            roles = await _svc(session).list_roles(tenant_id=tenant_id)
+            roles = await RoleService(session, cache=cache).list_roles(tenant_id=tenant_id)
             return [RoleResponse.model_validate(r) for r in roles]
 
     @router.get("/roles/{role_id}", response_model=RoleResponse)
@@ -79,7 +80,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         _: AuthPayload = Depends(require_permission("rbac:read")),
     ) -> Any:
         async with db.session() as session:
-            role = await _svc(session).get_role(role_id)
+            role = await RoleService(session, cache=cache).get_role(role_id)
             if role is None:
                 raise HTTPException(status_code=404, detail="Role not found")
             return RoleResponse.model_validate(role)
@@ -91,7 +92,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         _: AuthPayload = Depends(require_permission("rbac:write")),
     ) -> Any:
         async with db.session() as session:
-            svc = _svc(session)
+            svc = RoleService(session, cache=cache)
             try:
                 role = await svc.assign_permission_to_role(
                     role_id, body.permission_id
@@ -112,7 +113,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         _: AuthPayload = Depends(require_permission("rbac:write")),
     ) -> Any:
         async with db.session() as session:
-            svc = _svc(session)
+            svc = RoleService(session, cache=cache)
             try:
                 role = await svc.remove_permission_from_role(
                     role_id, permission_id
@@ -134,7 +135,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
             try:
-                await _svc(session).assign_role_to_member(
+                await RoleService(session, cache=cache).assign_role_to_member(
                     user_id, tenant_id, body.role_id
                 )
                 await session.commit()
@@ -152,7 +153,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         _: AuthPayload = Depends(require_permission("rbac:write")),
     ) -> Any:
         async with db.session() as session:
-            perm = await _svc(session).create_permission(
+            perm = await PermissionService(session, cache=cache).create_permission(
                 name=body.name, description=body.description
             )
             await session.commit()
@@ -164,7 +165,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         _: AuthPayload = Depends(require_permission("rbac:read")),
     ) -> Any:
         async with db.session() as session:
-            return await _svc(session).list_permissions()
+            return await PermissionService(session, cache=cache).list_permissions()
 
     @router.get(
         "/users/{user_id}/tenants/{tenant_id}/permissions",
@@ -176,7 +177,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         _: AuthPayload = Depends(require_permission("rbac:read")),
     ) -> Any:
         async with db.session() as session:
-            return await _svc(session).get_permissions_for_user(user_id, tenant_id)
+            return await PermissionService(session, cache=cache).get_permissions_for_user(user_id, tenant_id)
 
     # ── « Moi » : droits de l'utilisateur courant (gating UI frontend) ────────
     # Authentifié uniquement — aucun droit RBAC requis : chacun lit SES propres
@@ -197,7 +198,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         if not tenant_id:
             return []
         async with db.session() as session:
-            return await _svc(session).get_permissions_for_user(user["sub"], tenant_id)
+            return await PermissionService(session, cache=cache).get_permissions_for_user(user["sub"], tenant_id)
 
     @router.get(
         "/me/roles",
@@ -211,7 +212,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         if not tenant_id:
             return []
         async with db.session() as session:
-            return await _svc(session).list_member_roles(user["sub"], tenant_id)
+            return await MemberRoleService(session, cache=cache).list_member_roles(user["sub"], tenant_id)
 
     # ── Surface OWNER (tenant-scopée) ─────────────────────────────────────────
     # Pas de gate `rbac:write` global : on autorise le owner du tenant ciblé.
@@ -230,7 +231,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         async with db.session() as session:
             # entitled_plugins=None pour l'instant (intersection entitlement
             # xlicense = hook à venir). Renvoie tout ce qui est délégable.
-            return await _svc(session).list_grantable_permissions()
+            return await PermissionService(session, cache=cache).list_grantable_permissions()
 
     @router.post(
         "/tenants/{tenant_id}/roles",
@@ -245,7 +246,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
     ) -> Any:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
-            svc = _svc(session)
+            svc = RoleService(session, cache=cache)
             role = await svc.create_tenant_role(
                 tenant_id=tenant_id,
                 name=body.name,
@@ -253,8 +254,6 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
                 description=body.description,
             )
             await session.commit()
-            # Re-charge avec permissions (selectinload) et matérialise EN session :
-            # éviter le DetachedInstanceError à la sérialisation post-réponse.
             role = await svc.get_role(role.id)
             return RoleResponse.model_validate(role)
 
@@ -271,7 +270,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
             try:
-                await _svc(session).grant_permission_to_member(
+                await PermissionService(session, cache=cache).grant_permission_to_member(
                     user_id=user_id,
                     tenant_id=tenant_id,
                     permission_name=body.permission_name,
@@ -294,7 +293,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
     ) -> dict:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
-            removed = await _svc(session).revoke_permission_from_member(
+            removed = await PermissionService(session, cache=cache).revoke_permission_from_member(
                 user_id, tenant_id, permission_name
             )
             await session.commit()
@@ -313,7 +312,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
     ) -> Any:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
-            roles = await _svc(session).list_tenant_roles(tenant_id)
+            roles = await RoleService(session, cache=cache).list_tenant_roles(tenant_id)
             return [RoleResponse.model_validate(r) for r in roles]
 
     @router.post(
@@ -329,7 +328,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
     ) -> Any:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
-            svc = _svc(session)
+            svc = RoleService(session, cache=cache)
             try:
                 role = await svc.add_permission_to_tenant_role(
                     tenant_id, role_id, body.permission_name
@@ -353,7 +352,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
     ) -> Any:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
-            svc = _svc(session)
+            svc = RoleService(session, cache=cache)
             try:
                 role = await svc.remove_permission_from_tenant_role(
                     tenant_id, role_id, permission_name
@@ -376,7 +375,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
             try:
-                await _svc(session).delete_tenant_role(tenant_id, role_id)
+                await RoleService(session, cache=cache).delete_tenant_role(tenant_id, role_id)
                 await session.commit()
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
@@ -392,7 +391,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
     ) -> Any:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
-            return await _svc(session).list_tenant_members(tenant_id)
+            return await MemberRoleService(session, cache=cache).list_tenant_members(tenant_id)
 
     @router.get(
         "/tenants/{tenant_id}/members/{user_id}/permissions",
@@ -406,7 +405,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
     ) -> Any:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
-            return await _svc(session).get_permissions_for_user(user_id, tenant_id)
+            return await PermissionService(session, cache=cache).get_permissions_for_user(user_id, tenant_id)
 
     # ── Owner : multi-rôles d'un membre ──────────────────────────────────────
 
@@ -422,7 +421,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
     ) -> Any:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
-            return await _svc(session).list_member_roles(user_id, tenant_id)
+            return await MemberRoleService(session, cache=cache).list_member_roles(user_id, tenant_id)
 
     @router.post(
         "/tenants/{tenant_id}/members/{user_id}/roles",
@@ -437,7 +436,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
             try:
-                await _svc(session).add_role_to_member(
+                await MemberRoleService(session, cache=cache).add_role_to_member(
                     user_id, tenant_id, body.role_id, granted_by=user["sub"]
                 )
                 await session.commit()
@@ -457,7 +456,7 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
     ) -> dict:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
-            removed = await _svc(session).remove_role_from_member(
+            removed = await MemberRoleService(session, cache=cache).remove_role_from_member(
                 user_id, tenant_id, role_id
             )
             await session.commit()

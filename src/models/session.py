@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
@@ -35,3 +36,25 @@ class Session(Base):
     last_jti: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
     user: Mapped["User"] = relationship("User", back_populates="sessions")
+
+    @classmethod
+    def build(
+        cls,
+        user_id: str,
+        refresh_token: str,
+        expires_at: datetime,
+        *,
+        tenant_id: str | None = None,
+        ip_address: str | None = None,
+        device_fingerprint: str | None = None,
+        last_jti: str | None = None,
+    ) -> Session:
+        return cls(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            refresh_token=refresh_token,
+            device_fingerprint=device_fingerprint,
+            ip_address=ip_address,
+            expires_at=expires_at,
+            last_jti=last_jti,
+        )

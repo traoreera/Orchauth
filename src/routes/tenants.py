@@ -50,6 +50,11 @@ def tenants_router(db: Any, events: XAuthEvents | None = None) -> APIRouter:
     ) -> Any:
         user_id = payload.sub if hasattr(payload, "sub") else payload.get("sub")
         async with db.session() as session:
+            member_repo = TenantMemberRepository(session)
+            existing_memberships = await member_repo.get_memberships_for_user(user_id)
+            if len(existing_memberships) >= 3:
+                raise HTTPException(status_code=429, detail="Limite de 3 tenants atteinte")
+
             repo = TenantRepository(session)
             existing = await repo.get_by_slug(body.slug)
             if existing:

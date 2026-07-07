@@ -28,5 +28,4 @@ class InviteResponse(BaseModel):
     is_active: bool
     invited_by: str
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}

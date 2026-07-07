@@ -20,6 +20,14 @@ class RoleRepository(BaseRepository[Role]):
         )
         return result.scalar_one_or_none()
 
+    async def get_by_name(self, name: str) -> Optional[Role]:
+        result = await self.session.execute(
+            select(Role)
+            .options(selectinload(Role.permissions))
+            .where(Role.name == name, Role.tenant_id.is_(None))
+        )
+        return result.scalar_one_or_none()
+
     async def list_for_tenant(self, tenant_id: Optional[str]) -> list[Role]:
         # selectinload(permissions) : en async le lazy-load est impossible
         # (pas de greenlet) ; les réponses RoleResponse ont besoin des perms.
@@ -64,6 +72,7 @@ class MemberRoleRepository(BaseRepository[MemberRole]):
     model = MemberRole
 
     async def list_for_member(self, user_id: str, tenant_id: str) -> list[MemberRole]:
+        """TOUS les rôles du membre, tous scopes confondus (usage UI/listing)."""
         result = await self.session.execute(
             select(MemberRole).where(
                 MemberRole.user_id == user_id,
@@ -72,16 +81,57 @@ class MemberRoleRepository(BaseRepository[MemberRole]):
         )
         return list(result.scalars().all())
 
-    async def get_one(
-        self, user_id: str, tenant_id: str, role_id: str
-    ) -> Optional[MemberRole]:
-        result = await self.session.execute(
-            select(MemberRole).where(
-                MemberRole.user_id == user_id,
-                MemberRole.tenant_id == tenant_id,
-                MemberRole.role_id == role_id,
-            )
+    async def list_in_scope(
+        self,
+        user_id: str,
+        tenant_id: str,
+        scope_type: Optional[str] = None,
+        scope_id: Optional[str] = None,
+    ) -> list[MemberRole]:
+        """Rôles d'un membre dans UN scope précis.
+
+        scope_type=None → bucket GLOBAL (scope_type IS NULL AND scope_id IS NULL).
+        Sinon → assignations exactement scopées (scope_type, scope_id).
+        """
+        stmt = select(MemberRole).where(
+            MemberRole.user_id == user_id,
+            MemberRole.tenant_id == tenant_id,
         )
+        if scope_type is None:
+            stmt = stmt.where(
+                MemberRole.scope_type.is_(None), MemberRole.scope_id.is_(None)
+            )
+        else:
+            stmt = stmt.where(
+                MemberRole.scope_type == scope_type,
+                MemberRole.scope_id == scope_id,
+            )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_one(
+        self,
+        user_id: str,
+        tenant_id: str,
+        role_id: str,
+        scope_type: Optional[str] = None,
+        scope_id: Optional[str] = None,
+    ) -> Optional[MemberRole]:
+        stmt = select(MemberRole).where(
+            MemberRole.user_id == user_id,
+            MemberRole.tenant_id == tenant_id,
+            MemberRole.role_id == role_id,
+        )
+        if scope_type is None:
+            stmt = stmt.where(
+                MemberRole.scope_type.is_(None), MemberRole.scope_id.is_(None)
+            )
+        else:
+            stmt = stmt.where(
+                MemberRole.scope_type == scope_type,
+                MemberRole.scope_id == scope_id,
+            )
+        result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def list_for_role(self, tenant_id: str, role_id: str) -> list[MemberRole]:
@@ -100,6 +150,7 @@ class MemberPermissionRepository(BaseRepository[MemberPermission]):
     async def list_for_member(
         self, user_id: str, tenant_id: str
     ) -> list[MemberPermission]:
+        """TOUTES les permissions directes du membre, tous scopes confondus."""
         result = await self.session.execute(
             select(MemberPermission)
             .options(selectinload(MemberPermission.permission))
@@ -110,14 +161,57 @@ class MemberPermissionRepository(BaseRepository[MemberPermission]):
         )
         return list(result.scalars().all())
 
-    async def get_one(
-        self, user_id: str, tenant_id: str, permission_id: str
-    ) -> Optional[MemberPermission]:
-        result = await self.session.execute(
-            select(MemberPermission).where(
+    async def list_in_scope(
+        self,
+        user_id: str,
+        tenant_id: str,
+        scope_type: Optional[str] = None,
+        scope_id: Optional[str] = None,
+    ) -> list[MemberPermission]:
+        """Permissions directes d'un membre dans UN scope précis (voir MemberRoleRepository.list_in_scope)."""
+        stmt = (
+            select(MemberPermission)
+            .options(selectinload(MemberPermission.permission))
+            .where(
                 MemberPermission.user_id == user_id,
                 MemberPermission.tenant_id == tenant_id,
-                MemberPermission.permission_id == permission_id,
             )
         )
+        if scope_type is None:
+            stmt = stmt.where(
+                MemberPermission.scope_type.is_(None),
+                MemberPermission.scope_id.is_(None),
+            )
+        else:
+            stmt = stmt.where(
+                MemberPermission.scope_type == scope_type,
+                MemberPermission.scope_id == scope_id,
+            )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_one(
+        self,
+        user_id: str,
+        tenant_id: str,
+        permission_id: str,
+        scope_type: Optional[str] = None,
+        scope_id: Optional[str] = None,
+    ) -> Optional[MemberPermission]:
+        stmt = select(MemberPermission).where(
+            MemberPermission.user_id == user_id,
+            MemberPermission.tenant_id == tenant_id,
+            MemberPermission.permission_id == permission_id,
+        )
+        if scope_type is None:
+            stmt = stmt.where(
+                MemberPermission.scope_type.is_(None),
+                MemberPermission.scope_id.is_(None),
+            )
+        else:
+            stmt = stmt.where(
+                MemberPermission.scope_type == scope_type,
+                MemberPermission.scope_id == scope_id,
+            )
+        result = await self.session.execute(stmt)
         return result.scalar_one_or_none()

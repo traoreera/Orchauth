@@ -5,9 +5,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from xcore.sdk import get_logger
+
+logger = get_logger("xauth.password")
 
 from ..repositories.user import UserRepository
-from .auth import _check_password_policy, get_pwd_context
+from .auth.password import _check_password_policy, get_pwd_context
 from .events import XAuthEvents
 
 _RESET_KEY_PREFIX = "xauth:pwd_reset:"
@@ -41,6 +44,7 @@ class PasswordService:
         )
         if self._events:
             await self._events.password_reset_requested(email=email)
+        logger.info("Password reset token created for %s", email)
         return token
 
     async def reset_password(
@@ -70,6 +74,7 @@ class PasswordService:
         await self._cache.delete(key)
         if self._events:
             await self._events.password_reset_completed(email=user.email)
+        logger.info("Password reset completed for %s", user.email)
         return user.email
 
     # ── Change password (utilisateur authentifié) ─────────────────────────────
@@ -106,6 +111,7 @@ class PasswordService:
         await self._session.flush()
         if self._events:
             await self._events.password_changed(user_id=user_id)
+        logger.info("Password changed for user %s", user_id)
 
     # ── Set password (comptes OAuth sans password) ────────────────────────────
 
@@ -133,3 +139,4 @@ class PasswordService:
         await self._session.flush()
         if self._events:
             await self._events.password_set(user_id=user_id)
+        logger.info("Password set for user %s", user_id)

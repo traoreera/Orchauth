@@ -13,6 +13,7 @@ from xcore.kernel.api import AuthPayload, get_current_user
 from ..providers.base import OAuthProvider
 from ..services.oauth import OAuthService
 from ..services.token import TokenService
+from ..utils.http import get_client_ip
 
 
 class OAuthLinkRequest(BaseModel):
@@ -30,12 +31,6 @@ def oauth_router(
 
     def _svc(session) -> OAuthService:
         return OAuthService(session, token_service, cache, providers)
-
-    def _extract_ip(request: Request) -> str:
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
 
     @router.get("/providers")
     async def list_providers() -> Any:
@@ -77,7 +72,7 @@ def oauth_router(
         Point d'entrée retour provider. Échange le code, crée/retrouve le user,
         redirige vers erp://oauth-callback?... (deep-link Tauri).
         """
-        ip = _extract_ip(request)
+        ip = get_client_ip(request)
         async with db.session() as session:
             svc = _svc(session)
             try:

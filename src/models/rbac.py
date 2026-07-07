@@ -92,7 +92,14 @@ class MemberRole(Base):
 
     __tablename__ = "xauth_member_roles"
     __table_args__ = (
-        UniqueConstraint("user_id", "tenant_id", "role_id", name="uq_member_role"),
+        UniqueConstraint(
+            "user_id",
+            "tenant_id",
+            "role_id",
+            "scope_type",
+            "scope_id",
+            name="uq_member_role",
+        ),
     )
 
     id: Mapped[str] = mapped_column(
@@ -107,6 +114,13 @@ class MemberRole(Base):
     role_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("xauth_roles.id"), nullable=False
     )
+    # ── Scope générique (sous-tenant) ─────────────────────────────────────────
+    # NULL/NULL = rôle GLOBAL au tenant (comportement historique). Sinon le rôle
+    # n'est effectif que dans ce scope (ex: scope_type="entrepot", scope_id=<uuid>).
+    # scope_id est OPAQUE pour Orchauth : c'est l'ID d'une entité d'un autre plugin
+    # (pas de FK cross-plugin, comme user_id côté xcompany).
+    scope_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    scope_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     granted_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=True
@@ -125,7 +139,12 @@ class MemberPermission(Base):
     __tablename__ = "xauth_member_permissions"
     __table_args__ = (
         UniqueConstraint(
-            "user_id", "tenant_id", "permission_id", name="uq_member_permission"
+            "user_id",
+            "tenant_id",
+            "permission_id",
+            "scope_type",
+            "scope_id",
+            name="uq_member_permission",
         ),
     )
 
@@ -141,6 +160,9 @@ class MemberPermission(Base):
     permission_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("xauth_permissions.id"), nullable=False
     )
+    # Scope générique — voir MemberRole.scope_type/scope_id. NULL = global au tenant.
+    scope_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    scope_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     granted_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=True

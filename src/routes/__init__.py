@@ -1,4 +1,5 @@
 from .auth import auth_router
+from .sessions import sessions_router
 from .tenants import tenants_router
 from .rbac import rbac_router
 from .mfa import mfa_router
@@ -11,6 +12,7 @@ from .notifications import notifications_router
 
 __all__ = [
     "auth_router",
+    "sessions_router",
     "tenants_router",
     "rbac_router",
     "mfa_router",

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from xcore.sdk import get_logger
 
 from ..models.rbac import Permission, Role
 from ..models.tenant import Tenant
@@ -12,9 +12,9 @@ from ..models.user import TenantMember, User
 from ..repositories.rbac import PermissionRepository, RoleRepository
 from ..repositories.tenant import TenantRepository
 from ..repositories.user import TenantMemberRepository, UserRepository
-from .auth import get_pwd_context
+from .auth.password import get_pwd_context
 
-logger = logging.getLogger("xauth.seed")
+logger = get_logger("xauth.seed")
 
 # ── Catalogue de permissions ──────────────────────────────────────────────────
 #
@@ -190,7 +190,7 @@ async def seed_permissions(session: AsyncSession) -> dict[str, Permission]:
             )
             await repo.save(perm)
             result[pdef.name] = perm
-            logger.debug("Permission créée : %s", pdef.name)
+            logger.debug("Permission created: %s", pdef.name)
         else:
             changed = False
             if existing.description != pdef.description:
@@ -207,7 +207,7 @@ async def seed_permissions(session: AsyncSession) -> dict[str, Permission]:
                 changed = True
             if changed:
                 await repo.save(existing)
-                logger.debug("Permission mise à jour : %s", pdef.name)
+                logger.debug("Permission updated: %s", pdef.name)
             result[pdef.name] = existing
     return result
 
@@ -243,7 +243,7 @@ async def seed_default_tenant(session: AsyncSession, cfg: dict) -> Tenant:
     if tenant is None:
         tenant = Tenant(name=cfg["ADMIN_TENANT_NAME"], slug=cfg["ADMIN_TENANT_SLUG"])
         await repo.save(tenant)
-        logger.info("Tenant '%s' créé", cfg["ADMIN_TENANT_SLUG"])
+        logger.info("Tenant '%s' created", cfg["ADMIN_TENANT_SLUG"])
     return tenant
 
 
@@ -266,12 +266,12 @@ async def seed_admin_role(
             description="Accès administrateur complet à toutes les ressources",
         )
         await role_repo.save(admin_role)
-        logger.info("Rôle admin créé")
+        logger.info("Admin role created")
 
     admin_role = await role_repo.get_with_permissions(admin_role.id)
     delta = _sync_role_permissions(admin_role, set(permissions.keys()), permissions)
     if delta:
-        logger.info("Rôle admin : %d permission(s) synchronisée(s)", delta)
+        logger.info("Admin role: %d permission(s) synced", delta)
     await session.flush()
     return admin_role
 
@@ -294,12 +294,12 @@ async def seed_user_role(
             description="Accès standard pour les utilisateurs inscrits",
         )
         await role_repo.save(user_role)
-        logger.info("Rôle user créé")
+        logger.info("User role created")
 
     user_role = await role_repo.get_with_permissions(user_role.id)
     delta = _sync_role_permissions(user_role, set(USER_PERMISSIONS), permissions)
     if delta:
-        logger.info("Rôle user : %d permission(s) synchronisée(s)", delta)
+        logger.info("User role: %d permission(s) synced", delta)
     await session.flush()
     return user_role
 
@@ -324,12 +324,12 @@ async def seed_tenant_admin_role(
             description="Propriétaire d'un tenant — gestion limitée à son tenant",
         )
         await role_repo.save(role)
-        logger.info("Rôle '%s' créé", role_name)
+        logger.info("Role '%s' created", role_name)
 
     role = await role_repo.get_with_permissions(role.id)
     delta = _sync_role_permissions(role, set(TENANT_ADMIN_PERMISSIONS), permissions)
     if delta:
-        logger.info("Rôle tenant_admin : %d permission(s) synchronisée(s)", delta)
+        logger.info("Tenant_admin role: %d permission(s) synced", delta)
     await session.flush()
     return role
 
@@ -348,7 +348,7 @@ async def seed_admin_user(
         hashed = get_pwd_context().hash(cfg["ADMIN_PASSWORD"])
         user = User(email=cfg["ADMIN_EMAIL"], hashed_password=hashed, is_active=True)
         await user_repo.save(user)
-        logger.info("Utilisateur admin créé : %s", cfg["ADMIN_EMAIL"])
+        logger.info("Admin user created: %s", cfg["ADMIN_EMAIL"])
 
     membership = await member_repo.get_membership(user.id, tenant.id)
     if membership is None:
@@ -359,7 +359,7 @@ async def seed_admin_user(
             is_owner=True,
         )
         await member_repo.save(membership)
-        logger.info("Membership admin créé pour tenant '%s'", tenant.slug)
+        logger.info("Admin membership created for tenant '%s'", tenant.slug)
     elif membership.role_id != admin_role.id or not membership.is_owner:
         membership.role_id = admin_role.id
         membership.is_owner = True
@@ -391,12 +391,12 @@ async def run_seed(db: Any, cfg: dict) -> None:
             await seed_admin_user(session, tenant, admin_role, cfg)
             await session.commit()
             logger.info(
-                "Seed xauth terminé — %d permissions, rôles admin+user créés",
+                "Seed complete — %d permissions, admin+user roles created",
                 len(permissions),
             )
         except Exception:
             await session.rollback()
-            logger.exception("Erreur lors du seed xauth")
+            logger.exception("Seed failed")
             raise
 
     # Cleanup des invitations expirées au démarrage
@@ -408,8 +408,33 @@ async def run_seed(db: Any, cfg: dict) -> None:
             count = await repo.deactivate_expired()
             if count:
                 logger.info(
-                    "Cleanup : %d invitation(s) expirée(s) désactivée(s)", count
+                    "Cleanup: %d expired invitation(s) deactivated", count
                 )
             await session.commit()
     except Exception:
-        logger.warning("Cleanup invitations échoué (non bloquant)", exc_info=True)
+        logger.warning("Invitation cleanup failed (non-blocking)", exc_info=True)
+
+
+def build_seed_cfg(seed_yaml: dict, env: dict) -> dict:
+    fields = {
+        "ADMIN_EMAIL": "admin_email",
+        "ADMIN_PASSWORD": "admin_password",
+        "ADMIN_TENANT_SLUG": "admin_tenant_slug",
+        "ADMIN_TENANT_NAME": "admin_tenant_name",
+        "ADMIN_ROLE_NAME": "admin_role_name",
+        "USER_ROLE_NAME": "user_role_name",
+    }
+    result: dict = {}
+    missing: list[str] = []
+    for env_key, yaml_key in fields.items():
+        value = env.get(env_key) or seed_yaml.get(yaml_key)
+        if not value:
+            missing.append(f"seed.{yaml_key}")
+        else:
+            result[env_key] = value
+    if missing:
+        raise RuntimeError(
+            "[xauth] Incomplete seed configuration — missing fields in plugin.yaml: "
+            + ", ".join(missing)
+        )
+    return result

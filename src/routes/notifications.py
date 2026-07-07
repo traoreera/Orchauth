@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import html
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from xcore.kernel.api import AuthPayload, get_current_user
 
@@ -21,8 +22,7 @@ class NotificationOut(BaseModel):
     is_read: bool
     created_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
     @classmethod
     def from_orm(cls, n: Notification) -> "NotificationOut":
@@ -30,10 +30,10 @@ class NotificationOut(BaseModel):
             id=n.id,
             user_id=n.user_id,
             tenant_id=n.tenant_id,
-            title=n.title,
-            message=n.message,
+            title=html.escape(n.title) if n.title else n.title,
+            message=html.escape(n.message) if n.message else n.message,
             type=n.type,
-            link=n.link,
+            link=n.link if n.link and not n.link.startswith("javascript:") else None,
             is_read=n.is_read,
             created_at=n.created_at.isoformat(),
         )
@@ -66,6 +66,8 @@ def notifications_router(db: Any) -> APIRouter:
         body: CreateNotificationBody,
         user: AuthPayload = Depends(get_current_user),
     ) -> Any:
+        if body.link and body.link.startswith("javascript:"):
+            raise HTTPException(status_code=400, detail="Invalid link")
         target_user_id = body.user_id or user["sub"]
         tenant_id = (user.get("user") or {}).get("tenant_id")
         async with db.session() as session:

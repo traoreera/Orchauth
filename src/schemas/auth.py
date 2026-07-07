@@ -2,17 +2,6 @@ from typing import Optional
 from pydantic import BaseModel, EmailStr
 
 
-class UserRootSchemas(BaseModel):
-
-    ADMIN_EMAIL: str
-    ADMIN_PASSWORD: str
-    ADMIN_TENANT_SLUG: str
-    ADMIN_TENANT_NAME: str
-    ADMIN_ROLE_NAME: str
-    USER_ROLE_NAME: str
-
-
-
 class TenantInfo(BaseModel):
     id: str
     name: Optional[str] = None
@@ -73,5 +62,4 @@ class UserResponse(BaseModel):
     mfa_enabled: bool
     has_password: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}

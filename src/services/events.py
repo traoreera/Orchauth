@@ -7,32 +7,32 @@ from typing import Any
 # Tous les autres plugins peuvent s'abonner via self.ctx.events.on("xauth.*")
 
 # Auth
-USER_REGISTERED     = "xauth.auth.registered"
-USER_LOGIN          = "xauth.auth.login"
-USER_LOGIN_FAILED   = "xauth.auth.login_failed"
-USER_LOGOUT         = "xauth.auth.logout"
-SESSION_REFRESHED   = "xauth.auth.session_refreshed"
+USER_REGISTERED = "xauth.auth.registered"
+USER_LOGIN = "xauth.auth.login"
+USER_LOGIN_FAILED = "xauth.auth.login_failed"
+USER_LOGOUT = "xauth.auth.logout"
+SESSION_REFRESHED = "xauth.auth.session_refreshed"
 
 # Password
 PASSWORD_RESET_REQUESTED = "xauth.password.reset_requested"
 PASSWORD_RESET_COMPLETED = "xauth.password.reset_completed"
-PASSWORD_CHANGED         = "xauth.password.changed"
-PASSWORD_SET             = "xauth.password.set"
+PASSWORD_CHANGED = "xauth.password.changed"
+PASSWORD_SET = "xauth.password.set"
 
 # OAuth
-OAUTH_LOGIN  = "xauth.oauth.login"
+OAUTH_LOGIN = "xauth.oauth.login"
 OAUTH_LINKED = "xauth.oauth.linked"
 OAUTH_UNLINKED = "xauth.oauth.unlinked"
 
 # Invitations
-INVITE_CREATED  = "xauth.invite.created"
+INVITE_CREATED = "xauth.invite.created"
 INVITE_ACCEPTED = "xauth.invite.accepted"
 
 # Tenants
 TENANT_CREATED = "xauth.tenant.created"
 
 # MFA
-MFA_ENABLED  = "xauth.mfa.enabled"
+MFA_ENABLED = "xauth.mfa.enabled"
 MFA_DISABLED = "xauth.mfa.disabled"
 
 
@@ -64,11 +64,21 @@ class XAuthEvents:
 
     # ── Auth ──────────────────────────────────────────────────────────────────
 
-    async def user_registered(self, user_id: str, email: str, tenant_id: str | None = None) -> None:
-        await self.emit(USER_REGISTERED, {"user_id": user_id, "email": email, "tenant_id": tenant_id})
+    async def user_registered(
+        self, user_id: str, email: str, tenant_id: str | None = None
+    ) -> None:
+        await self.emit(
+            USER_REGISTERED,
+            {"user_id": user_id, "email": email, "tenant_id": tenant_id},
+        )
 
-    async def user_login(self, user_id: str, email: str, ip: str | None, tenant_id: str | None = None) -> None:
-        await self.emit(USER_LOGIN, {"user_id": user_id, "email": email, "ip": ip, "tenant_id": tenant_id})
+    async def user_login(
+        self, user_id: str, email: str, ip: str | None, tenant_id: str | None = None
+    ) -> None:
+        await self.emit(
+            USER_LOGIN,
+            {"user_id": user_id, "email": email, "ip": ip, "tenant_id": tenant_id},
+        )
 
     async def user_login_failed(self, email: str, ip: str | None, reason: str) -> None:
         await self.emit(USER_LOGIN_FAILED, {"email": email, "ip": ip, "reason": reason})
@@ -76,7 +86,9 @@ class XAuthEvents:
     async def user_logout(self, user_id: str) -> None:
         await self.emit(USER_LOGOUT, {"user_id": user_id})
 
-    async def session_refreshed(self, user_id: str, tenant_id: str | None = None) -> None:
+    async def session_refreshed(
+        self, user_id: str, tenant_id: str | None = None
+    ) -> None:
         await self.emit(SESSION_REFRESHED, {"user_id": user_id, "tenant_id": tenant_id})
 
     # ── Password ──────────────────────────────────────────────────────────────
@@ -96,7 +108,10 @@ class XAuthEvents:
     # ── OAuth ─────────────────────────────────────────────────────────────────
 
     async def oauth_login(self, user_id: str, provider: str, is_new: bool) -> None:
-        await self.emit(OAUTH_LOGIN, {"user_id": user_id, "provider": provider, "is_new_user": is_new})
+        await self.emit(
+            OAUTH_LOGIN,
+            {"user_id": user_id, "provider": provider, "is_new_user": is_new},
+        )
 
     async def oauth_linked(self, user_id: str, provider: str) -> None:
         await self.emit(OAUTH_LINKED, {"user_id": user_id, "provider": provider})
@@ -106,16 +121,33 @@ class XAuthEvents:
 
     # ── Invitations ───────────────────────────────────────────────────────────
 
-    async def invite_created(self, invite_id: str, email: str, tenant_id: str, invited_by: str) -> None:
-        await self.emit(INVITE_CREATED, {"invite_id": invite_id, "email": email, "tenant_id": tenant_id, "invited_by": invited_by})
+    async def invite_created(
+        self, invite_id: str, email: str, tenant_id: str, invited_by: str
+    ) -> None:
+        await self.emit(
+            INVITE_CREATED,
+            {
+                "invite_id": invite_id,
+                "email": email,
+                "tenant_id": tenant_id,
+                "invited_by": invited_by,
+            },
+        )
 
-    async def invite_accepted(self, invite_id: str, user_id: str, tenant_id: str) -> None:
-        await self.emit(INVITE_ACCEPTED, {"invite_id": invite_id, "user_id": user_id, "tenant_id": tenant_id})
+    async def invite_accepted(
+        self, invite_id: str, user_id: str, tenant_id: str
+    ) -> None:
+        await self.emit(
+            INVITE_ACCEPTED,
+            {"invite_id": invite_id, "user_id": user_id, "tenant_id": tenant_id},
+        )
 
     # ── Tenants ───────────────────────────────────────────────────────────────
 
     async def tenant_created(self, tenant_id: str, owner_id: str, slug: str) -> None:
-        await self.emit(TENANT_CREATED, {"tenant_id": tenant_id, "owner_id": owner_id, "slug": slug})
+        await self.emit(
+            TENANT_CREATED, {"tenant_id": tenant_id, "owner_id": owner_id, "slug": slug}
+        )
 
     # ── MFA ───────────────────────────────────────────────────────────────────
 

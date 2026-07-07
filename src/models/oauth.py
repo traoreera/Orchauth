@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
@@ -27,7 +27,7 @@ class OAuthAccount(Base):
     provider_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     provider_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     provider_avatar: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(tz=timezone.utc))
 
     user: Mapped["User"] = relationship("User", back_populates="oauth_accounts")
 

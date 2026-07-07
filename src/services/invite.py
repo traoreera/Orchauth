@@ -5,6 +5,9 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from xcore.sdk import get_logger
+
+logger = get_logger("xauth.invite")
 
 from ..models.invite import Invite
 from ..models.user import TenantMember
@@ -40,6 +43,7 @@ class InviteService:
             await self._events.invite_created(
                 invite_id=str(saved.id), email=email, tenant_id=tenant_id, invited_by=invited_by
             )
+        logger.info("Invite created: email=%s tenant=%s by=%s", email, tenant_id, invited_by)
         return saved
 
     async def accept_invite(self, token: str, user_id: str) -> TenantMember:
@@ -83,6 +87,7 @@ class InviteService:
                 invite_id=str(invite.id), user_id=user_id, tenant_id=invite.tenant_id
             )
 
+        logger.info("Invite accepted: invite=%s user=%s tenant=%s", invite.id, user_id, invite.tenant_id)
         return membership
 
     async def list_invites(self, tenant_id: str) -> list[Invite]:
@@ -108,4 +113,5 @@ class InviteService:
             raise PermissionError("Not allowed to revoke this invite")
         invite.is_active = False
         await self._session.flush()
+        logger.info("Invite revoked: invite=%s by=%s", invite_id, requester_id)
         return invite

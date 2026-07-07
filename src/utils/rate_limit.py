@@ -14,6 +14,11 @@ import time
 from typing import Any, Callable
 
 from fastapi import HTTPException, Request, status
+from xcore.sdk import get_logger
+
+from .http import get_client_ip
+
+logger = get_logger("xauth.ratelimit")
 
 
 class RateLimiter:
@@ -36,22 +41,21 @@ class RateLimiter:
             if current >= self._max_calls:
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="Trop de tentatives. Réessayez dans quelques instants.",
+                    detail="Too many requests. Please try again shortly.",
                     headers={"Retry-After": str(self._period)},
                 )
             await self._cache.set(key, current + 1, ttl=self._period * 2)
         except HTTPException:
             raise
         except Exception:
-            # Défaillance du cache → on laisse passer (fail open)
-            pass
+            logger.exception("Cache error, blocking request")
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Service temporarily unavailable",
+            )
 
     def for_route(self, route: str) -> Callable:
         async def _dep(request: Request) -> None:
-            forwarded = request.headers.get("x-forwarded-for")
-            ip = forwarded.split(",")[0].strip() if forwarded else (
-                request.client.host if request.client else "unknown"
-            )
-            await self._check(route, ip)
+            await self._check(route, get_client_ip(request))
 
         return _dep

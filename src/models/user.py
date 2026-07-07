@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from .base import Base
 
 if TYPE_CHECKING:
@@ -71,7 +71,7 @@ class TenantMember(Base):
     role_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("xauth_roles.id"), nullable=True
     )
-    joined_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    joined_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(tz=timezone.utc))
     is_owner: Mapped[bool] = mapped_column(Boolean, default=False)
 
     __table_args__ = (

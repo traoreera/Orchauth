@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
@@ -21,6 +21,6 @@ class Notification(Base):
     type: Mapped[str] = mapped_column(String(32), nullable=False, default="SYSTEM")
     link: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(tz=timezone.utc), server_default=func.now())
 
     user = relationship("User", back_populates="notifications")

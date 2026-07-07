@@ -4,9 +4,12 @@ import contextlib
 from typing import Any
 
 from xcore.kernel.api.auth import AuthPayload
+from xcore.sdk import get_logger
 
 from .services.token import TokenService
 from .repositories.user import UserRepository
+
+logger = get_logger("xauth.backend")
 
 
 class XAuthBackend:
@@ -43,9 +46,11 @@ class XAuthBackend:
         if token:
             return token
 
-        # 3. Query param (WebSocket, liens)
+        # 3. Query param (WebSocket, liens signés)
         token = request.query_params.get("access_token")
-        return token or  None
+        if token:
+            logger.warning("Token transmitted via query param (insecure)")
+        return token or None
 
     async def decode_token(self, token: str) -> AuthPayload | None:
         try:
@@ -56,9 +61,12 @@ class XAuthBackend:
         # Vérifier que le JTI n'est pas blacklisté (logout effectué)
         jti = claims.get("jti")
         if jti and self._cache:
-            with contextlib.suppress(Exception):
+            try:
                 if await self._cache.get(f"xauth:jti_bl:{jti}"):
                     return None
+            except Exception:
+                logger.exception("JTI blacklist cache check failed, rejecting token")
+                return None
         user_id: str = claims["sub"]
         tenant_id: str | None = claims.get("tenant_id")
         permissions: list[str] = []
@@ -67,9 +75,6 @@ class XAuthBackend:
         with contextlib.suppress(Exception):
             async with self._db.session() as session:
                 from .repositories.user import TenantMemberRepository
-                from .services.rbac import RBACService
-
-                # Si le token ne contient pas de tenant_id, on prend le premier membership
                 if not tenant_id:
                     member_repo = TenantMemberRepository(session)
                     memberships = await member_repo.get_memberships_for_user(user_id)
@@ -77,9 +82,12 @@ class XAuthBackend:
                         tenant_id = memberships[0].tenant_id
 
                 if tenant_id:
-                    svc = RBACService(session, cache=self._cache)
-                    permissions = await svc.get_permissions_for_user(user_id, tenant_id)
-                    roles = await svc.get_roles_for_user(user_id, tenant_id)
+                    from .services.rbac import MemberRoleService, PermissionService
+
+                    perm_svc = PermissionService(session, cache=self._cache)
+                    permissions = await perm_svc.get_permissions_for_user(user_id, tenant_id)
+                    member_svc = MemberRoleService(session, cache=self._cache)
+                    roles = await member_svc.get_roles_for_user(user_id, tenant_id)
         async with self._db.session() as session:
             user_repo = UserRepository(session)
             user = await user_repo.get(user_id)

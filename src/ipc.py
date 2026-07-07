@@ -35,8 +35,8 @@ class IPCCommands(AutoDispatchMixin):
             permissions: list[str] = []
             if tenant_id:
                 async with self._db.session() as session:
-                    from .services.rbac import RBACService
-                    svc = RBACService(session, cache=self._cache)
+                    from .services.rbac import PermissionService
+                    svc = PermissionService(session, cache=self._cache)
                     permissions = await svc.get_permissions_for_user(user_id, tenant_id)
             return ok(
                 user_id=user_id,
@@ -60,9 +60,44 @@ class IPCCommands(AutoDispatchMixin):
     async def _ipc_has_permission(self, payload) -> dict:
         try:
             async with self._db.session() as session:
-                from .services.rbac import RBACService
-                svc = RBACService(session, cache=self._cache)
+                from .services.rbac import PermissionService
+                svc = PermissionService(session, cache=self._cache)
                 result = await svc.has_permission(payload.user_id, payload.tenant_id, payload.permission)
+            return ok(has_permission=result)
+        except Exception as exc:
+            return error(str(exc), code="error")
+
+    @action("xauth.has_permission_scoped")
+    @schema(
+        version="1.0",
+        input={
+            "user_id": (str, ...),
+            "tenant_id": (str, ...),
+            "permission": (str, ...),
+            "scope_type": (str, None),
+            "scope_id": (str, None),
+        },
+        output={"has_permission": bool},
+        type_response="model",
+        unset=False,
+    )
+    async def _ipc_has_permission_scoped(self, payload) -> dict:
+        """Vérifie une permission dans un scope (ex: scope_type="entrepot", scope_id=<uuid>).
+
+        scope_type/scope_id absents ⇒ équivaut à xauth.has_permission (global).
+        Une permission globale (scope NULL) reste valable dans tout scope.
+        """
+        try:
+            async with self._db.session() as session:
+                from .services.rbac import PermissionService
+                svc = PermissionService(session, cache=self._cache)
+                result = await svc.has_permission(
+                    payload.user_id,
+                    payload.tenant_id,
+                    payload.permission,
+                    getattr(payload, "scope_type", None),
+                    getattr(payload, "scope_id", None),
+                )
             return ok(has_permission=result)
         except Exception as exc:
             return error(str(exc), code="error")
@@ -216,10 +251,10 @@ class IPCCommands(AutoDispatchMixin):
         except Exception as exc:
             return error(str(exc), code="error")
 
-    @action("xauth.users.list.tennant")
+    @action("xauth.users.list.tenant")
     @schema(
         version="1.0",
-        input={"tennant_id": (str, None)},
+        input={"tenant_id": (str, None)},
         output={"users": list},
         type_response="model",
         unset=False,
@@ -228,6 +263,6 @@ class IPCCommands(AutoDispatchMixin):
         from .repositories.user import TenantMemberRepository
         async with self._db.session() as sess:
             repo = TenantMemberRepository(sess)
-            users = await repo.get_members_of_tenant(payload.tennant_id)
-            logger.info(f"users: {users}, tennant_id: {payload.tennant_id}")
+            users = await repo.get_members_of_tenant(payload.tenant_id)
+            logger.info(f"users: {users}, tenant_id: {payload.tenant_id}")
         return ok(users=[user.user_id for user in users])
