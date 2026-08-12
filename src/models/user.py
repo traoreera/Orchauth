@@ -36,6 +36,18 @@ class User(Base):
 
     __table_args__ = (Index("ix_xauth_user_email", "email"),)
 
+    @property
+    def has_password(self) -> bool:
+        """Lu par `UserResponse.model_validate(user)` (routes/auth.py `/me`).
+
+        `UserResponse.has_password` a un défaut `False` sans cette propriété :
+        Pydantic lit l'attribut du même nom sur l'objet ORM, or `hashed_password`
+        (pas `has_password`) est la colonne réelle — sans elle, `/me` renvoyait
+        `has_password: false` pour absolument tous les utilisateurs, y compris
+        ceux avec un vrai mot de passe.
+        """
+        return self.hashed_password is not None
+
     tenant_memberships: Mapped[List["TenantMember"]] = relationship(
         "TenantMember", back_populates="user", cascade="all, delete-orphan"
     )
@@ -55,6 +67,15 @@ class User(Base):
         "Notification", back_populates="user", cascade="all, delete-orphan"
     )
 
+    @property
+    def has_password(self) -> bool:
+        """Lu par `UserResponse.model_validate(user, from_attributes=True)`
+        (route GET /me) — sans cette propriété, `has_password` retombait
+        systématiquement sur son défaut Pydantic (`False`) pour tous les
+        utilisateurs, y compris ceux ayant un vrai mot de passe défini, car
+        aucun attribut `has_password` n'existait sur ce modèle."""
+        return self.hashed_password is not None
+
 
 class TenantMember(Base):
     __tablename__ = "xauth_tenant_members"
@@ -65,6 +86,7 @@ class TenantMember(Base):
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("xauth_users.id"), nullable=False
     )
+    user_tenant_status: Mapped[bool] = mapped_column(Boolean, default=True)
     tenant_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("xauth_tenants.id"), nullable=False
     )

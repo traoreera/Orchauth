@@ -34,6 +34,7 @@ _DEFAULT_RULES: list[tuple[str, int, int]] = [
     ("/app/auth/password/forgot", 1, 120),
     ("/app/auth/password/reset",  3, 300),
     ("/app/auth/oauth/",         20,  60),
+    ("/app/auth/mfa/",            10, 60),
 ]
 _DEFAULT_FALLBACK = (300, 60)
 
@@ -46,7 +47,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         app:          ASGI app
         cache:        service cache xcore (get/set async)
         route_limits: liste de tuples (prefix, max_calls, period_seconds)
-                      surchargée via integration.yaml si besoin
+                    urchargée via integration.yaml si besoin
     """
 
     def __init__(

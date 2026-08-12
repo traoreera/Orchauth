@@ -9,7 +9,21 @@ class GoogleProvider(OAuthProvider):
     name = "google"
     auth_url = "https://accounts.google.com/o/oauth2/v2/auth"
     token_url = "https://oauth2.googleapis.com/token"
-    scopes = ["openid", "email", "profile"]
+    # gmail.modify : lecture/écriture messages/threads/labels/brouillons —
+    # tout sauf la suppression PERMANENTE (bypass corbeille), qui exige le
+    # scope restreint https://mail.google.com/ (soumis à vérification
+    # Google/CASA pour une app en prod, volontairement pas demandé ici :
+    # GoogleServiceClient.delete_message existe pour ceux qui l'ajoutent).
+    # calendar : accès complet Calendar (agendas + calendarList + events),
+    # plus large que calendar.events pour couvrir create/update/delete
+    # calendar et calendarList côté GoogleServiceClient.
+    scopes = [
+        "openid",
+        "email",
+        "profile",
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/calendar",
+    ]
 
     def get_auth_url(self, state: str, extra_params=None) -> str:
         return super().get_auth_url(state, {"access_type": "offline", "prompt": "consent"})

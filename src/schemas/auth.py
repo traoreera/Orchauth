@@ -22,6 +22,7 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
     tenant_id: Optional[str] = None
+    device_fingerprint: Optional[str] = None
 
 
 class RefreshRequest(BaseModel):

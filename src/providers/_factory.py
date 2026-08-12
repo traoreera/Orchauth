@@ -15,7 +15,7 @@ def build_oauth_providers(
     base_url = base_url.rstrip("/")
     providers: dict[str, OAuthProvider] = {}
 
-    _registry = [
+    _registry:list[tuple[str, type[OAuthProvider], str, str]] = [
         ("google", GoogleProvider, "OAUTH_GOOGLE_CLIENT_ID", "OAUTH_GOOGLE_CLIENT_SECRET"),
         ("github", GitHubProvider, "OAUTH_GITHUB_CLIENT_ID", "OAUTH_GITHUB_CLIENT_SECRET"),
         ("discord", DiscordProvider, "OAUTH_DISCORD_CLIENT_ID", "OAUTH_DISCORD_CLIENT_SECRET"),

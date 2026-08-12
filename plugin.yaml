@@ -12,7 +12,7 @@ framework_version: ">=2.0.0"
 # ── Application ───────────────────────────────────────────────────────────────
 app:
   name: "XAuth"
-  base_url: "http://localhost:8000"
+  base_url: "${XAUTH_APP_BASE_URL}"
 
 # ── Seed — tenant et compte admin créés au démarrage ─────────────────────────
 # Toutes les valeurs sont overridables via les variables d'environnement
@@ -64,18 +64,33 @@ env:
   JWT_REFRESH_EXPIRE_DAYS: "${XAUTH_JWT_REFRESH_EXPIRE_DAYS}"
 
   # App URL (optionnel — la section app: est la source par défaut)
-  APP_BASE_URL: "${XAUTH_APP_BASE_URL}"
+
   APP_NAME: "${XAUTH_APP_NAME}"
 
   # OAuth providers — secrets, toujours via env
   OAUTH_GOOGLE_CLIENT_ID: "${XAUTH_OAUTH_GOOGLE_CLIENT_ID}"
   OAUTH_GOOGLE_CLIENT_SECRET: "${XAUTH_OAUTH_GOOGLE_CLIENT_SECRET}"
+  
   OAUTH_GITHUB_CLIENT_ID: "${XAUTH_OAUTH_GITHUB_CLIENT_ID}"
   OAUTH_GITHUB_CLIENT_SECRET: "${XAUTH_OAUTH_GITHUB_CLIENT_SECRET}"
+  
   OAUTH_DISCORD_CLIENT_ID: "${XAUTH_OAUTH_DISCORD_CLIENT_ID}"
   OAUTH_DISCORD_CLIENT_SECRET: "${XAUTH_OAUTH_DISCORD_CLIENT_SECRET}"
+  
   OAUTH_MICROSOFT_CLIENT_ID: "${XAUTH_OAUTH_MICROSOFT_CLIENT_ID}"
   OAUTH_MICROSOFT_CLIENT_SECRET: "${XAUTH_OAUTH_MICROSOFT_CLIENT_SECRET}"
+  # Clé Fernet (32 octets base64) chiffrant au repos les access/refresh
+  # tokens Gmail/Calendar stockés sur OAuthAccount — générer avec
+  # `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+  # Sans cette clé, le login OAuth fonctionne normalement mais aucun jeton
+  # Google (Gmail/Calendar) n'est stocké.
+  OAUTH_TOKEN_KEY: "${XAUTH_OAUTH_TOKEN_KEY}"
+  # Origines https autorisées comme cible finale du callback OAuth pour un
+  # frontend web (liste séparée par des virgules, ex.
+  # "https://app.orchestra.io,https://staging.orchestra.io"). Vide par
+  # défaut : seul le deep-link desktop erp:// fonctionne tant qu'aucune
+  # origine web n'est déclarée ici — voir routes/oauth.py, utils/deeplink.py.
+  OAUTH_WEB_REDIRECT_ORIGINS: "${XAUTH_OAUTH_WEB_REDIRECT_ORIGINS}"
 
 # ── Événements émis ──────────────────────────────────────────────────────────
 events_emitted:

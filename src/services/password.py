@@ -49,6 +49,7 @@ class PasswordService:
 
     async def reset_password(
         self,
+        *,
         token: str,
         new_password: str,
         min_length: int = 8,
@@ -140,3 +141,12 @@ class PasswordService:
         if self._events:
             await self._events.password_set(user_id=user_id)
         logger.info("Password set for user %s", user_id)
+
+
+    async def verify_password(self, user_id: str, password: str) -> bool:
+        """Vérifie si le mot de passe correspond à l'utilisateur."""
+        repo = UserRepository(self._session)
+        user = await repo.get(user_id)
+        if user is None or not user.hashed_password:
+            return False
+        return get_pwd_context().verify(password, user.hashed_password)

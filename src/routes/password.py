@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, field_validator
 from xcore.kernel.api import AuthPayload, get_current_user
 
@@ -20,6 +21,7 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
+    otp_code: str | None = None
 
     @field_validator("new_password")
     @classmethod
@@ -32,6 +34,7 @@ class ResetPasswordRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
+    opt_code:str | None = None
 
 
 class SetPasswordRequest(BaseModel):
@@ -99,28 +102,6 @@ def password_router(
             )
 
         return {"detail": "Mot de passe réinitialisé avec succès."}
-
-    # ── Change (utilisateur connecté) ─────────────────────────────────────────
-
-    @router.post("/change", status_code=status.HTTP_200_OK)
-    async def change_password(
-        body: ChangePasswordRequest,
-        user: AuthPayload = Depends(get_current_user),
-    ) -> Any:
-        """Change le mot de passe de l'utilisateur authentifié."""
-        async with db.session() as session:
-            svc = _svc(session)
-            try:
-                await svc.change_password(
-                    user_id=user["sub"],
-                    current_password=body.current_password,
-                    new_password=body.new_password,
-                )
-                await session.commit()
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc))
-
-        return {"detail": "Mot de passe modifié avec succès."}
 
     # ── Set (comptes OAuth sans password) ─────────────────────────────────────
 

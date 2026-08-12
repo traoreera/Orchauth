@@ -10,6 +10,7 @@ from ..repositories.session import SessionRepository
 from ..services.auth import AuthenticationService
 from ..services.token import TokenService
 from ..utils.http import get_client_ip
+from ..utils.rate_limit import RateLimiter
 
 
 class SessionResponse(BaseModel):
@@ -27,13 +28,16 @@ class SessionResponse(BaseModel):
 class VerifyMFARequest(BaseModel):
     mfa_token: str
     code: str
+    device_fingerprint: str | None = None
 
 
 def sessions_router(db: Any, token_service: TokenService, cache: Any = None) -> APIRouter:
     router = APIRouter(tags=["sessions"])
 
+    _rl_verify_mfa = RateLimiter(cache, max_calls=5, period=60).for_route("verify-mfa")
+
     @router.post("/auth/verify-mfa")
-    async def verify_mfa(body: VerifyMFARequest, request: Request) -> Any:
+    async def verify_mfa(body: VerifyMFARequest, request: Request, _rl: None = Depends(_rl_verify_mfa)) -> Any:
         """
         Deuxième étape du login MFA.
         Vérifie le challenge JWT (mfa_token, 5 min) + code TOTP.
@@ -47,6 +51,7 @@ def sessions_router(db: Any, token_service: TokenService, cache: Any = None) -> 
                     mfa_token=body.mfa_token,
                     totp_code=body.code,
                     ip_address=ip,
+                    device_fingerprint=body.device_fingerprint,
                 )
                 await session.commit()
                 return result

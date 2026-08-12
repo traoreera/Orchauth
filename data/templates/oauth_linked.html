@@ -6,64 +6,46 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <title>Compte {{ provider }} lié — {{ app_name }}</title>
 </head>
-<body style="margin:0;padding:0;background-color:#050B18;font-family:'Courier New',Courier,monospace;">
+<body style="margin:0;padding:0;background-color:#F9FAFB;font-family:'Inter','Segoe UI',Helvetica,Arial,sans-serif;">
 
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#050B18;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F9FAFB;">
     <tr>
       <td align="center" style="padding:40px 16px;">
 
-        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;box-shadow:0 1px 3px rgba(19,22,27,0.08);">
 
-          <!-- Header -->
-          <tr>
-            <td style="background-color:#0F172A;border-top:3px solid #3B82F6;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="padding:32px 40px 28px;">
-                    <table role="presentation" cellpadding="0" cellspacing="0">
-                      <tr>
-                        <td style="border-left:3px solid #3B82F6;padding-left:14px;">
-                          <div style="font-family:'Courier New',Courier,monospace;font-size:22px;font-weight:700;color:#F8FAFC;letter-spacing:0.12em;text-transform:uppercase;">{{ app_name }}</div>
-                          <div style="font-family:Georgia,'Times New Roman',serif;font-size:11px;color:#64748B;letter-spacing:0.2em;text-transform:uppercase;margin-top:3px;">Authentification &amp; Accès</div>
-                        </td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
+          {% include "_email_header.html" %}
 
           <!-- Body -->
           <tr>
-            <td style="background-color:#1E293B;padding:48px 40px 40px;">
+            <td style="background-color:#FFFFFF;padding:48px 40px 40px;">
 
               <!-- Label -->
               <table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
                 <tr>
-                  <td style="background-color:#052E16;border:1px solid #166534;border-radius:3px;padding:5px 12px;">
-                    <span style="font-family:'Courier New',Courier,monospace;font-size:10px;color:#4ADE80;letter-spacing:0.25em;text-transform:uppercase;">COMPTE LIÉ</span>
+                  <td style="background-color:#E9FBF0;border:1px solid #21C45D;border-radius:4px;padding:5px 12px;">
+                    <span style="font-family:'Inter','Segoe UI',Helvetica,Arial,sans-serif;font-size:11px;color:#157E3C;letter-spacing:0.14em;text-transform:uppercase;font-weight:600;">Compte lié</span>
                   </td>
                 </tr>
               </table>
 
-              <h1 style="font-family:Georgia,'Times New Roman',serif;font-size:28px;font-weight:400;color:#F8FAFC;margin:0 0 16px;line-height:1.25;">Nouveau fournisseur<br>d'identité connecté</h1>
+              <h1 style="font-family:'Inter','Segoe UI',Helvetica,Arial,sans-serif;font-size:26px;font-weight:700;color:#13161B;margin:0 0 16px;line-height:1.3;">Nouveau fournisseur<br>d'identité connecté</h1>
 
-              <p style="font-family:Georgia,'Times New Roman',serif;font-size:16px;color:#94A3B8;margin:0 0 36px;line-height:1.7;">Bonjour <strong style="color:#E2E8F0;">{{ username }}</strong>, votre compte <strong style="color:#E2E8F0;">{{ provider }}</strong> a été associé à votre profil.</p>
+              <p style="font-family:'Inter','Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;color:#3A404A;margin:0 0 36px;line-height:1.7;">Bonjour <strong style="color:#13161B;">{{ username }}</strong>, votre compte <strong style="color:#13161B;">{{ provider }}</strong> a été associé à votre profil.</p>
 
               <!-- Provider info block -->
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:36px;background-color:#0F172A;border-left:3px solid #22C55E;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:36px;background-color:#F9FAFB;border-left:3px solid #21C45D;">
                 <tr>
                   <td style="padding:20px 24px;">
                     <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                       <tr>
                         <td>
-                          <div style="font-family:'Courier New',Courier,monospace;font-size:10px;color:#64748B;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:8px;">FOURNISSEUR</div>
-                          <div style="font-family:Georgia,'Times New Roman',serif;font-size:18px;color:#F8FAFC;margin-bottom:4px;">{{ provider }}</div>
-                          <div style="font-family:'Courier New',Courier,monospace;font-size:12px;color:#3B82F6;">{{ provider_email }}</div>
+                          <div style="font-family:'Inter','Segoe UI',Helvetica,Arial,sans-serif;font-size:10px;color:#6C727F;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:8px;">Fournisseur</div>
+                          <div style="font-family:'Inter','Segoe UI',Helvetica,Arial,sans-serif;font-size:17px;color:#13161B;margin-bottom:4px;">{{ provider }}</div>
+                          <div style="font-family:'Inter','Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#006664;">{{ provider_email }}</div>
                         </td>
                         <td align="right" valign="middle">
-                          <div style="font-family:'Courier New',Courier,monospace;font-size:10px;color:#22C55E;letter-spacing:0.1em;text-transform:uppercase;background-color:#052E16;border:1px solid #166534;border-radius:3px;padding:6px 10px;display:inline-block;">ACTIF</div>
+                          <div style="font-family:'Inter','Segoe UI',Helvetica,Arial,sans-serif;font-size:10px;color:#157E3C;letter-spacing:0.06em;text-transform:uppercase;background-color:#E9FBF0;border:1px solid #21C45D;border-radius:4px;padding:6px 10px;display:inline-block;">Actif</div>
                         </td>
                       </tr>
                     </table>
@@ -72,17 +54,17 @@
               </table>
 
               <!-- Security notice -->
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:40px;background-color:#1C1917;border:1px solid #44403C;border-radius:3px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:40px;background-color:#FEF5E7;border:1px solid #FDE8C4;border-radius:6px;">
                 <tr>
                   <td style="padding:18px 20px;">
                     <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                       <tr>
                         <td valign="top" width="24">
-                          <div style="font-family:'Courier New',Courier,monospace;font-size:14px;color:#F59E0B;font-weight:700;">!</div>
+                          <div style="font-family:'Inter','Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;color:#9D6607;font-weight:700;">!</div>
                         </td>
                         <td style="padding-left:10px;">
-                          <div style="font-family:'Courier New',Courier,monospace;font-size:10px;color:#F59E0B;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:6px;">AVIS DE SÉCURITÉ</div>
-                          <p style="font-family:Georgia,'Times New Roman',serif;font-size:13px;color:#A8A29E;margin:0;line-height:1.6;">Si vous n'êtes pas à l'origine de cette action, contactez immédiatement le support. Votre compte pourrait être compromis.</p>
+                          <div style="font-family:'Inter','Segoe UI',Helvetica,Arial,sans-serif;font-size:10px;color:#9D6607;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:6px;font-weight:600;">Avis de sécurité</div>
+                          <p style="font-family:'Inter','Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;color:#764C05;margin:0;line-height:1.6;">Si vous n'êtes pas à l'origine de cette action, contactez immédiatement le support. Votre compte pourrait être compromis.</p>
                         </td>
                       </tr>
                     </table>
@@ -93,8 +75,8 @@
               <!-- CTA -->
               <table role="presentation" cellpadding="0" cellspacing="0">
                 <tr>
-                  <td style="background-color:#3B82F6;border-radius:3px;">
-                    <a href="{{ support_url | default('#') }}" style="display:inline-block;font-family:'Courier New',Courier,monospace;font-size:13px;font-weight:700;color:#FFFFFF;text-decoration:none;padding:14px 32px;letter-spacing:0.15em;text-transform:uppercase;">Contacter le support</a>
+                  <td style="background-color:#00A8A5;border-radius:6px;">
+                    <a href="{{ support_url | default('#') }}" style="display:inline-block;font-family:'Inter','Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;color:#FFFFFF;text-decoration:none;padding:14px 32px;letter-spacing:0.02em;">Contacter le support</a>
                   </td>
                 </tr>
               </table>
@@ -102,21 +84,7 @@
             </td>
           </tr>
 
-          <!-- Footer -->
-          <tr>
-            <td style="background-color:#0F172A;padding:24px 40px;border-top:1px solid #1E293B;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td>
-                    <p style="font-family:'Courier New',Courier,monospace;font-size:11px;color:#334155;margin:0;letter-spacing:0.08em;">&copy; {{ app_name }} &mdash; Tous droits réservés</p>
-                  </td>
-                  <td align="right">
-                    <p style="font-family:'Courier New',Courier,monospace;font-size:10px;color:#1E3A8A;margin:0;letter-spacing:0.1em;text-transform:uppercase;">SECURE &bull; ENTERPRISE</p>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
+          {% include "_email_footer.html" %}
 
         </table>
       </td>
