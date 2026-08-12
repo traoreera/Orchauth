@@ -9,6 +9,8 @@ from .oauth import oauth_router
 from .password import password_router
 from .account import account_router
 from .notifications import notifications_router
+from .bridge import bridge_router
+from ..utils.deeplink import wrap_bridge
 
 __all__ = [
     "auth_router",
@@ -22,4 +24,6 @@ __all__ = [
     "password_router",
     "account_router",
     "notifications_router",
+    "bridge_router",
+    "wrap_bridge",
 ]

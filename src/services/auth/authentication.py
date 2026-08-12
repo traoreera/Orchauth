@@ -81,6 +81,8 @@ class AuthenticationService:
                 refresh_token_plain = self._token.create_refresh_token()
                 refresh_token_hashed = self._token.hash_token(refresh_token_plain)
                 session_repo = SessionRepository(self._session)
+                if device_fingerprint:
+                    await session_repo.revoke_active_for_device(user.id, device_fingerprint)
                 pending_session = Session.build(
                     user_id=user.id,
                     refresh_token=refresh_token_hashed,
@@ -153,6 +155,8 @@ class AuthenticationService:
             membership = await member_repo.get_membership(user.id, tenant_id)
             if membership is None:
                 raise ValueError("User is not a member of this tenant")
+            if not membership.user_tenant_status:
+                raise ValueError("Your account is desactivate on this organisation")
 
         refresh_token_plain = self._token.create_refresh_token()
         refresh_token_hashed = self._token.hash_token(refresh_token_plain)
@@ -176,6 +180,9 @@ class AuthenticationService:
         access_token, jti = self._token.create_access_token(
             user_id=user.id, tenant_id=tenant_id, email=user.email
         )
+
+        if device_fingerprint:
+            await session_repo.revoke_active_for_device(user.id, device_fingerprint)
 
         session = Session.build(
             user_id=user.id,
@@ -241,6 +248,25 @@ class AuthenticationService:
         if membership is None:
             raise ValueError("User is not a member of this tenant")
 
+        if session.user.mfa_enabled:
+            # `session.user` est déjà chargée en eager loading par
+            # SessionRepository.get_by_refresh_token() (selectinload) — on
+            # évite volontairement `membership.user`, qui lazy-load et lève
+            # MissingGreenlet en session async (TenantMemberRepository.get_membership
+            # ne fait pas de selectinload sur .user).
+            mfa_token = self._token.create_mfa_challenge_token(user_id=session.user_id, tenant_id=tenant_id)
+            return {
+                "access_token": "",
+                "refresh_token": "",
+                "mfa_token": mfa_token,
+                "token_type": "bearer",
+                "user_id": session.user_id,
+                "tenant_id": tenant_id,
+                "mfa_required": True,
+                "tenants": None,
+            }
+            # TODO: document it for frontend api integration to update this verification elements
+
         access_token, jti = self._token.create_access_token(
             user_id=session.user_id, tenant_id=tenant_id
         )
@@ -296,7 +322,7 @@ class AuthenticationService:
         user_id = claims["sub"]
         tenant_id = claims.get("tenant_id")
 
-        from .mfa import MFAService
+        from ..mfa import MFAService # fixed: import here to avoid circular import
 
         mfa_svc = MFAService(self._session)
         valid = await mfa_svc.verify_totp(user_id, totp_code)
@@ -309,6 +335,10 @@ class AuthenticationService:
             user_id=user_id, tenant_id=tenant_id
         )
 
+        session_repo = SessionRepository(self._session)
+        if device_fingerprint:
+            await session_repo.revoke_active_for_device(user_id, device_fingerprint)
+
         session = Session.build(
             user_id=user_id,
             tenant_id=tenant_id,
@@ -319,7 +349,7 @@ class AuthenticationService:
             + timedelta(days=self._token.refresh_expire),
             last_jti=jti,
         )
-        await SessionRepository(self._session).save(session)
+        await session_repo.save(session)
 
         return {
             "access_token": access_token,

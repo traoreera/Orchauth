@@ -115,6 +115,24 @@ class MemberRoleService:
             ids.add(mr.role_id)
         return sorted(ids)
 
+    async def list_roles_in_scope(
+        self,
+        user_id: str,
+        tenant_id: str,
+        scope_type: Optional[str] = None,
+        scope_id: Optional[str] = None,
+    ) -> list[str]:
+        """Rôles d'un membre pour UN scope précis (ex. scope_type="branch",
+        scope_id=<branch_id>) — contrairement à `list_member_roles`, ne
+        fusionne pas tous les scopes : nécessaire pour révoquer précisément
+        les rôles liés à une ressource donnée (ex. retrait d'une branche)
+        sans toucher aux rôles globaux ou scopés ailleurs."""
+        mr_repo = MemberRoleRepository(self._session)
+        return sorted({
+            mr.role_id
+            for mr in await mr_repo.list_in_scope(user_id, tenant_id, scope_type, scope_id)
+        })
+
     async def list_tenant_members(self, tenant_id: str) -> list[dict]:
         member_repo = TenantMemberRepository(self._session)
         mr_repo = MemberRoleRepository(self._session)

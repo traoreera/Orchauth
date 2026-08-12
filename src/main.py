@@ -17,6 +17,7 @@ from .routes import (
     account_router,
     audit_router,
     auth_router,
+    bridge_router,
     invites_router,
     mfa_router,
     notifications_router,
@@ -32,6 +33,7 @@ from .services.events import XAuthEvents
 from .services.rbac import PluginGrantService
 from .services.seed import build_seed_cfg, run_seed
 from .services.token import TokenService
+from .services.token_crypto import OAuthTokenCipher
 
 logger = get_logger('auth')
 
@@ -48,7 +50,8 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
             db_url=str(db.engine.url), migrations_dir=_migrations_dir
         )
         try:
-            await runner.init(autogenerate=False, message="first_initialisation")
+            #await runner.init(autogenerate=True, message="first_initialisation")
+            await runner.revision(autogenerate=True, message="first_initialisation")
             await runner.upgrade()
         except Exception as exc:
             logger.warning("[xauth] Migration upgrade skipped: %s", exc)
@@ -61,7 +64,6 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
 
         db = self.get_service("db")
         cache = self.get_service("cache")
-
         await self._initialize_tables(db)
 
         self._db = db
@@ -71,7 +73,7 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
         jwt_cfg = cfg.get("jwt", {})
 
         app_name = env.get("APP_NAME") or app_cfg.get("name", "XAuth")
-        app_base_url = env.get("APP_BASE_URL") or app_cfg.get("base_url", "http://localhost:8000")
+        app_base_url = app_cfg.get("base_url", "http://localhost:8000")
 
         private_key = env.get("JWT_PRIVATE_KEY_PATH") or jwt_cfg.get("private_key_path", "conf/private.pem")
         public_key = env.get("JWT_PUBLIC_KEY_PATH") or jwt_cfg.get("public_key_path", "conf/public.pem")
@@ -99,6 +101,32 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
         self._events = XAuthEvents(self.ctx.events)
 
         oauth_providers = build_oauth_providers(env, app_base_url)
+        self._oauth_providers = oauth_providers
+
+        # Chiffrement au repos des jetons Gmail/Calendar (voir
+        # services/token_crypto.py) — sans clé configurée, le stockage de
+        # jetons est simplement désactivé (login OAuth inchangé), jamais de
+        # repli en clair.
+        self._token_cipher = OAuthTokenCipher(env.get("OAUTH_TOKEN_KEY"))
+
+        # Extension optionnelle (Gmail/Calendar au nom de l'utilisateur) —
+        # absente dans un déploiement qui ne la configure pas, ne doit pas
+        # empêcher le chargement du plugin auth (même garde que XPulses pour
+        # ext.pubsub).
+        self._google = None
+        try:
+            self._google = self.get_service("ext.google")
+        except Exception as exc:
+            logger.warning("[xauth] ext.google indisponible : %s", exc)
+
+        # Origines web autorisées à recevoir la redirection finale du
+        # callback OAuth (voir routes/oauth.py, utils/deeplink.py) — vide
+        # par défaut : seul erp:// fonctionne tant qu'aucun frontend web
+        # n'est déclaré ici. Ex. "https://app.orchestra.io,https://staging.orchestra.io".
+        raw_web_origins = env.get("OAUTH_WEB_REDIRECT_ORIGINS") or ""
+        web_redirect_origins = frozenset(
+            origin.strip() for origin in raw_web_origins.split(",") if origin.strip()
+        )
 
         seed_cfg = cfg.get("seed", {})
         user_role_name = env.get("USER_ROLE_NAME") or seed_cfg.get("user_role_name", "user")
@@ -113,15 +141,23 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
         )
         self.app.include_router(tenants_router(db, self._events))
         self.app.include_router(rbac_router(db, cache=cache))
-        self.app.include_router(mfa_router(db, self._token_service))
+        self.app.include_router(mfa_router(db, self._token_service, cache=cache))
         self.app.include_router(invites_router(db, self._email_service, self._events))
         self.app.include_router(audit_router(db))
-        self.app.include_router(oauth_router(db, cache, self._token_service, oauth_providers))
+        self.app.include_router(
+            oauth_router(
+                db, cache, self._token_service, oauth_providers,
+                token_cipher=self._token_cipher, web_redirect_origins=web_redirect_origins,
+            )
+        )
         self.app.include_router(password_router(db, cache, self._email_service, self._events))
         self.app.include_router(sessions_router(db, self._token_service, cache=cache))
-        self.app.include_router(account_router(db))
+        self.app.include_router(
+            account_router(db, self.call_plugin, event_bus=self.ctx.events, token_service=self._token_service)
+        )
         self.app.include_router(notifications_router(db))
         self.app.include_router(admin_router(db, cache=cache, token_service=self._token_service))
+        self.app.include_router(bridge_router(app_name))
 
         await run_seed(db, cfg=build_seed_cfg(cfg.get("seed", {}), env))
         self._register_rbac_listeners()

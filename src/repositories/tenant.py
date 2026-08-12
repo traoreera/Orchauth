@@ -16,3 +16,8 @@ class TenantRepository(BaseRepository[Tenant]):
             select(Tenant).where(Tenant.slug == slug)
         )
         return result.scalar_one_or_none()
+    
+    async def get_all(self):
+        return [tenant.id for tenant in (await self.session.execute(
+            select(Tenant)
+        )).scalars().all()]

@@ -26,6 +26,7 @@ from ..services.auth import (
 from ..services.email import AuthEmailService
 from ..services.events import XAuthEvents
 from ..services.token import TokenService
+from ..utils.deeplink import wrap_bridge
 from ..utils.http import get_client_ip
 from ..utils.rate_limit import RateLimiter
 
@@ -64,7 +65,10 @@ def auth_router(
                     template="welcome",
                     context={
                         "username": user.email,
-                        "login_url": f"{email_service.auth.base_url}/login",
+                        # Auparavant une URL de l'API JSON sans page /login
+                        # (auth Constat 9) — désormais un deep-link erp://login
+                        # emballé dans la page de rebond https.
+                        "login_url": wrap_bridge(email_service.auth.base_url, "erp://login"),
                     },
                 )
                 return user
@@ -82,6 +86,7 @@ def auth_router(
                     password=body.password,
                     tenant_id=body.tenant_id,
                     ip_address=ip,
+                    device_fingerprint=body.device_fingerprint,
                 )
                 await session.commit()
                 response = JSONResponse(content=result)

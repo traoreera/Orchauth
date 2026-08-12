@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from ..models.user import User, TenantMember
@@ -60,3 +60,31 @@ class TenantMemberRepository(BaseRepository[TenantMember]):
             .where(TenantMember.tenant_id == tenant_id)
         )
         return list(result.scalars().all())
+
+    async def user_tenant_status(self, tenant_id: str, user_id: str, status: bool) -> dict:
+        # 1. Vérifier si l'utilisateur appartient bien au tenant
+        has_membership = (await self.session.execute(
+            select(TenantMember)
+            .where(TenantMember.user_id == user_id)
+            .where(TenantMember.tenant_id == tenant_id)
+        )).scalar_one_or_none()
+
+        if not has_membership:
+            return {"error": "User not found in this tenant"}
+
+        # 2. Mettre à jour le statut de l'utilisateur — scopé au tenant ET à l'utilisateur,
+        # jamais l'un sans l'autre (sinon désactive l'utilisateur dans tous ses tenants).
+        await self.session.execute(
+            update(TenantMember)
+            .where(TenantMember.user_id == user_id)
+            .where(TenantMember.tenant_id == tenant_id)
+            .values(user_tenant_status=status)
+        )
+        
+        # 3. Valider la transaction
+        await self.session.flush()
+
+        return {
+            "user_id": user_id,
+            "status": status
+        }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ....utils.deeplink import wrap_bridge
 from ..base import EmailTransport
 
 
@@ -13,7 +14,10 @@ class PasswordEmailSender(EmailTransport):
         reset_token: str,
         expires_minutes: int = 30,
     ) -> bool:
-        reset_url = f"{self.base_url}/xauth/password/reset?token={reset_token}"
+        # Auparavant un lien direct vers l'endpoint API POST-only (auth
+        # Constat 9) — désormais un deep-link erp://password-reset emballé
+        # dans la page de rebond https, cohérent avec invitation/oauth.
+        reset_url = wrap_bridge(self.base_url, f"erp://password-reset?token={reset_token}")
         return await self.send(
             to=to,
             subject="Réinitialisation de votre mot de passe",

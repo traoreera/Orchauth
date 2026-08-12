@@ -70,3 +70,27 @@ class OAuthProvider:
 
     async def get_user_info(self, access_token: str) -> OAuthUserInfo:
         raise NotImplementedError
+
+    async def refresh_access_token(self, refresh_token: str) -> dict[str, Any]:
+        """
+        Échange un refresh_token contre un nouvel access_token — même schéma
+        OAuth2 standard (RFC 6749 §6) pour tous les providers de ce module.
+        Utilisé pour prolonger l'accès à une API tierce (ex. Gmail/Calendar
+        Google) au-delà de la courte durée de vie de l'access_token initial.
+        """
+        import httpx
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                self.token_url,
+                data={
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+                headers={"Accept": "application/json"},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()

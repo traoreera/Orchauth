@@ -1,11 +1,17 @@
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from xcore.kernel.api import AuthPayload, get_current_user
 
 from ..services.mfa import MFAService
+from ..utils.rate_limit import RateLimiter
+
+if TYPE_CHECKING:
+    from ..services.token import TokenService
 
 
 class VerifyMFARequest(BaseModel):
@@ -21,11 +27,21 @@ class MfaVerifyLoginRequest(BaseModel):
     code: str
 
 
-def mfa_router(db: Any, token_service: Optional[Any] = None) -> APIRouter:
+class DisableMFARequest(BaseModel):
+    code: str
+
+
+def mfa_router(db: Any, token_service: Optional[TokenService] = None, cache: Any = None) -> APIRouter:
     router = APIRouter(prefix="/mfa", tags=["mfa"])
 
+    _rl_verify_login = RateLimiter(cache, max_calls=5, period=60).for_route("mfa-verify-login")
+    _rl_setup        = RateLimiter(cache, max_calls=5, period=60).for_route("mfa-setup")
+    _rl_enable       = RateLimiter(cache, max_calls=5, period=60).for_route("mfa-enable")
+    _rl_verify       = RateLimiter(cache, max_calls=5, period=60).for_route("mfa-verify")
+    _rl_disable      = RateLimiter(cache, max_calls=5, period=60).for_route("mfa-disable")
+
     @router.post("/verify-login")
-    async def verify_mfa_login(body: MfaVerifyLoginRequest) -> Any:
+    async def verify_mfa_login(body: MfaVerifyLoginRequest, _rl: None = Depends(_rl_verify_login)) -> Any:
         if token_service is None:
             raise HTTPException(status_code=503, detail="Service non configuré")
         try:
@@ -76,6 +92,7 @@ def mfa_router(db: Any, token_service: Optional[Any] = None) -> APIRouter:
     @router.post("/setup")
     async def setup_totp(
         user: AuthPayload = Depends(get_current_user),
+        _rl: None = Depends(_rl_setup),
     ) -> Any:
         async with db.session() as session:
             svc = MFAService(session)
@@ -92,6 +109,7 @@ def mfa_router(db: Any, token_service: Optional[Any] = None) -> APIRouter:
     async def enable_mfa(
         body: EnableMFARequest,
         user: AuthPayload = Depends(get_current_user),
+        _rl: None = Depends(_rl_enable),
     ) -> Any:
         async with db.session() as session:
             svc = MFAService(session)
@@ -105,6 +123,7 @@ def mfa_router(db: Any, token_service: Optional[Any] = None) -> APIRouter:
     async def verify_totp(
         body: VerifyMFARequest,
         user: AuthPayload = Depends(get_current_user),
+        _rl: None = Depends(_rl_verify),
     ) -> Any:
         async with db.session() as session:
             svc = MFAService(session)
@@ -113,10 +132,14 @@ def mfa_router(db: Any, token_service: Optional[Any] = None) -> APIRouter:
 
     @router.delete("/", status_code=status.HTTP_204_NO_CONTENT)
     async def disable_mfa(
+        body: DisableMFARequest,
         user: AuthPayload = Depends(get_current_user),
+        _rl: None = Depends(_rl_disable),
     ) -> None:
         async with db.session() as session:
             svc = MFAService(session)
+            if not await svc.verify_totp(user["sub"], code=body.code):
+                raise HTTPException(status_code=400, detail="Code TOTP invalide ou expiré")
             await svc.disable_mfa(user["sub"])
             await session.commit()
 

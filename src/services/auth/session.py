@@ -123,3 +123,9 @@ class SessionService:
             await self._session.flush()
             raise ValueError("Refresh token expired")
         return session
+
+    async def invalidate_all_sessions(self, user_id: str) -> None:
+        await SessionRepository(self._session).revoke_all_for_user(user_id=user_id)
+
+        if self._events:
+            await self._events.password_changed(user_id=user_id)
