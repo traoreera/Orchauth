@@ -262,7 +262,7 @@ Client                                    XAuth
   │                                         │  Met à jour Session.tenant_id = uuid-A
   │                                         │  Met à jour Session.last_jti
   │  200 {                                  │
-  │    access_token: "eyJ...(tid=uuid-A)",  │
+  │    access_token: <JWT scopé tid=uuid-A>,│
   │    refresh_token: "uuid...",            │  ← même refresh token, pas de rotation
   │    tenant_id: "uuid-A",                 │
   │    mfa_required: false                  │
@@ -314,7 +314,7 @@ Client                                    XAuth
   │                                         │  Vérifie code TOTP
   │                                         │  Génère access_token final (tid=uuid-A)
   │                                         │  Met à jour last_jti
-  │  200 { access_token: "eyJ...(final)",   │
+  │  200 { access_token: <JWT final>,       │
   │         mfa_required: false }           │
   │ ◄──────────────────────────────────── │
 ```

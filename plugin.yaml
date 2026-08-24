@@ -19,7 +19,13 @@ app:
 # correspondantes (ADMIN_EMAIL, ADMIN_PASSWORD, etc.)
 seed:
   admin_email: "contact@xcorehub.dev"
-  admin_password: "Hunters123@"
+  # Jamais de mot de passe en dur ici — doit être fourni via la variable
+  # d'environnement ADMIN_PASSWORD (voir env: ci-dessous). Vide ici =
+  # build_seed_cfg() (services/seed.py) échoue explicitement au démarrage
+  # si ADMIN_PASSWORD n'est pas défini, plutôt que de seeder un compte
+  # admin avec un mot de passe public connu (trouvé en clair ici jusqu'à
+  # ce commit, et toujours présent dans l'historique git).
+  admin_password: ""
   admin_tenant_slug: "default"
   admin_tenant_name: "Default"
   admin_role_name: "admin"
@@ -190,6 +196,8 @@ permissions:
   - resource: "xauth.*"
     actions: ["*"]
     effect: allow
+  - resource: network
+    description: "Échange de jetons OAuth (Google/GitHub/Discord/Microsoft) via httpx"
 
 # ── Ressources ────────────────────────────────────────────────────────────────
 resources:
