@@ -41,6 +41,12 @@ jwt:
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 # Limites par route — format: "/chemin": [max_requetes, fenetre_secondes]
 # Mettre enabled: false pour désactiver en développement.
+# Modules PAYANTS (services/licensing.py) : les droits d'un de ces espaces de noms (`caisse:*`…) ne vont qu'aux membres d'une
+# organisation ABONNÉE (routes /licenses, écrites par license:manage). Vide = aucun module payant, rien n'est filtré.
+# Surchargeable par la variable XAUTH_PAID_MODULES (« caisse,paie »).
+licensing:
+  paid_modules: []
+
 rate_limit:
   enabled: true
   routes: {}

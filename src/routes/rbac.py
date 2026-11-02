@@ -229,9 +229,16 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
     ) -> Any:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
-            # entitled_plugins=None pour l'instant (intersection entitlement
-            # xlicense = hook à venir). Renvoie tout ce qui est délégable.
-            return await PermissionService(session, cache=cache).list_grantable_permissions()
+            # Un module PAYANT auquel l'organisation n'est pas abonnée n'offre pas ses droits à déléguer (services/licensing.py) :
+            # ils seraient de toute façon retirés au calcul des droits du membre.
+            from ..services.licensing import LicenseService, paid_modules
+
+            perms = await PermissionService(session, cache=cache).list_grantable_permissions()
+            paid = paid_modules()
+            if paid:
+                entitled = await LicenseService(session).entitled(tenant_id)
+                perms = [p for p in perms if p.name.split(":", 1)[0] not in paid or p.name.split(":", 1)[0] in entitled]
+            return perms
 
     @router.post(
         "/tenants/{tenant_id}/roles",

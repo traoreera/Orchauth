@@ -19,6 +19,7 @@ from .routes import (
     auth_router,
     bridge_router,
     invites_router,
+    licenses_router,
     mfa_router,
     notifications_router,
     oauth_router,
@@ -128,6 +129,11 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
             origin.strip() for origin in raw_web_origins.split(",") if origin.strip()
         )
 
+        from .services import licensing
+
+        licensing.configure(licensing.parse_paid(cfg, env))
+        logger.info("[xauth] modules payants : %s", ", ".join(sorted(licensing.paid_modules())) or "aucun")
+
         seed_cfg = cfg.get("seed", {})
         user_role_name = env.get("USER_ROLE_NAME") or seed_cfg.get("user_role_name", "user")
         admin_role_name = env.get("ADMIN_ROLE_NAME") or seed_cfg.get("admin_role_name", "admin")
@@ -156,6 +162,7 @@ class Plugin(IPCCommands, AutoDispatchMixin, TrustedBase):
             account_router(db, self.call_plugin, event_bus=self.ctx.events, token_service=self._token_service)
         )
         self.app.include_router(notifications_router(db))
+        self.app.include_router(licenses_router(db))
         self.app.include_router(admin_router(db, cache=cache, token_service=self._token_service))
         self.app.include_router(bridge_router(app_name))
 
