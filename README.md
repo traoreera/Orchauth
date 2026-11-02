@@ -306,6 +306,42 @@ async def publish(_ = Depends(require_permission("plugin:create"))):
 
 ---
 
+## Modules payants (abonnements par organisation)
+
+Un module payant est un **espace de noms de droits** : `caisse`, pour les droits `caisse:*` que le plugin caisse déclare par
+`rbac.declare`. La plateforme en fixe la liste, et ce n'est jamais le plugin qui décide s'il est payant :
+
+```yaml
+# plugin.yaml
+licensing:
+  paid_modules: [caisse]      # ou la variable XAUTH_PAID_MODULES="caisse,paie"
+```
+
+**La règle.** Un membre d'une organisation n'a les droits d'un module payant que si son organisation a un abonnement valide à ce
+module : état `active` ou `trial`, et date de fin absente ou à venir.
+
+- **Sans abonnement,** xauth retire ces droits au point unique où il les calcule (`PermissionService.get_permissions_for_user`).
+  Le jeton, `/rbac/me/permissions` et l'IPC passent tous par là. Le module disparaît du Desk et son API répond 403, sans rien
+  changer au plugin.
+- **À l'activation ou à la suspension,** l'effet vaut dès la requête suivante : le filtre s'applique après le cache des droits.
+- **Un module gratuit,** absent de la liste, n'est jamais filtré.
+- **La délégation suit.** Les droits d'un module non souscrit ne sont pas proposés à déléguer (`/rbac/tenants/{id}/grantable`).
+
+| Route | Qui | Effet |
+|---|---|---|
+| `GET /licenses/catalog` | tout utilisateur identifié | les modules payants |
+| `GET /licenses/tenants/{tenant_id}` | un membre de l'organisation, ou `license:manage` | chaque module payant et son abonnement |
+| `PUT /licenses/tenants/{tenant_id}/{module}` | `license:manage` | `{status: active\|trial\|suspended, valid_until?, note?}` : abonne, prolonge, suspend |
+| `DELETE /licenses/tenants/{tenant_id}/{module}` | `license:manage` | retire l'abonnement |
+
+Chaque écriture va au journal d'audit (`license.set`, `license.remove`). Les abonnements vivent dans la table
+`xauth_tenant_modules`, une ligne par couple (organisation, module), créée au démarrage.
+
+**Pas encore fait :**
+- l'encaissement en ligne : l'administrateur active les abonnements à la main ;
+- le renouvellement automatique ;
+- l'écran d'administration dans le Desk.
+
 ## Rate Limiting
 
 Limites par défaut (par IP) :
