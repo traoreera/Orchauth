@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from ....utils.deeplink import wrap_bridge
+from urllib.parse import urlencode
+
 from ..base import EmailTransport
 
 
@@ -14,10 +15,8 @@ class PasswordEmailSender(EmailTransport):
         reset_token: str,
         expires_minutes: int = 30,
     ) -> bool:
-        # Auparavant un lien direct vers l'endpoint API POST-only (auth
-        # Constat 9) — désormais un deep-link erp://password-reset emballé
-        # dans la page de rebond https, cohérent avec invitation/oauth.
-        reset_url = wrap_bridge(self.base_url, f"erp://password-reset?token={reset_token}")
+        # Lien WEB vers la page du Desk (`#/reset?token=…`), jamais un deep-link `erp://` : le destinataire ouvre son navigateur.
+        reset_url = f"{self.desk_url}#/reset?{urlencode({'token': reset_token})}"
         return await self.send(
             to=to,
             subject="Réinitialisation de votre mot de passe",

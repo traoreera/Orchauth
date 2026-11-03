@@ -54,7 +54,7 @@ class PermissionService:
             try:
                 cached = await self._cache.get(cache_key)
                 if cached:
-                    return await self._licensed(json.loads(cached), tenant_id)
+                    return json.loads(cached)
             except Exception:
                 pass
 
@@ -104,14 +104,7 @@ class PermissionService:
             except Exception:
                 pass
 
-        return await self._licensed(permissions, tenant_id)
-
-    async def _licensed(self, permissions: list[str], tenant_id: str) -> list[str]:
-        """Les droits d'un module PAYANT ne restent que si l'organisation y est abonnée (services/licensing.py). Appliqué APRÈS le
-        cache : l'activation ou la suspension d'un abonnement vaut dès la requête suivante, sans invalider le cache des droits."""
-        from ..licensing import LicenseService
-
-        return await LicenseService(self._session).licensed(permissions, tenant_id)
+        return permissions
 
     async def has_permission(
         self,

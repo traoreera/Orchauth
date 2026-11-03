@@ -34,7 +34,7 @@ class AuthenticationService:
 
     async def login(
         self,
-        email: str,
+        identifier: str,
         password: str,
         tenant_id: Optional[str] = None,
         ip_address: Optional[str] = None,
@@ -42,18 +42,20 @@ class AuthenticationService:
     ) -> dict[str, Any]:
         audit = AuditService(self._session)
         user_repo = UserRepository(self._session)
-        user = await user_repo.get_by_email(email)
-        if user is None or not get_pwd_context().verify(password, user.hashed_password):
+        # `identifier` : une adresse e-mail OU un nom d'utilisateur (ce qui contient « @ » est une adresse).
+        user = await user_repo.get_by_identifier(identifier)
+        # Un compte sans mot de passe (créé par un fournisseur externe) ne se connecte pas ici : même refus qu'un mauvais mot de passe.
+        if user is None or not user.hashed_password or not get_pwd_context().verify(password, user.hashed_password):
             await audit.log_event(
                 action="login.failed",
                 ip_address=ip_address,
-                metadata={"email": email, "reason": "invalid_credentials"},
+                metadata={"identifier": identifier, "reason": "invalid_credentials"},
             )
             if self._events:
                 await self._events.user_login_failed(
-                    email=email, ip=ip_address, reason="invalid_credentials"
+                    email=identifier, ip=ip_address, reason="invalid_credentials"
                 )
-            logger.warning("Login failed: invalid credentials for %s (ip=%s)", email, ip_address)
+            logger.warning("Login failed: invalid credentials for %s (ip=%s)", identifier, ip_address)
             raise ValueError("Invalid credentials")
         if not user.is_active:
             await audit.log_event(
@@ -64,9 +66,9 @@ class AuthenticationService:
             )
             if self._events:
                 await self._events.user_login_failed(
-                    email=email, ip=ip_address, reason="account_inactive"
+                    email=user.email, ip=ip_address, reason="account_inactive"
                 )
-            logger.warning("Login failed: account inactive for %s (ip=%s)", email, ip_address)
+            logger.warning("Login failed: account inactive for %s (ip=%s)", identifier, ip_address)
             raise ValueError("Account is inactive")
 
         member_repo = TenantMemberRepository(self._session)
@@ -100,7 +102,7 @@ class AuthenticationService:
                     metadata={"reason": "no_membership"},
                 )
                 await self._events.user_login(
-                    user_id=user.id, ip=ip_address, email=email
+                    user_id=user.id, ip=ip_address, email=user.email
                 )
                 return {
                     "access_token": access_token,
@@ -268,7 +270,7 @@ class AuthenticationService:
             # TODO: document it for frontend api integration to update this verification elements
 
         access_token, jti = self._token.create_access_token(
-            user_id=session.user_id, tenant_id=tenant_id
+            user_id=session.user_id, tenant_id=tenant_id, email=session.user.email
         )
 
         new_refresh_plain = self._token.create_refresh_token()
@@ -331,8 +333,9 @@ class AuthenticationService:
 
         refresh_plain = self._token.create_refresh_token()
         refresh_hashed = self._token.hash_token(refresh_plain)
+        user = await UserRepository(self._session).get(user_id)
         access_token, jti = self._token.create_access_token(
-            user_id=user_id, tenant_id=tenant_id
+            user_id=user_id, tenant_id=tenant_id, email=user.email if user else None
         )
 
         session_repo = SessionRepository(self._session)

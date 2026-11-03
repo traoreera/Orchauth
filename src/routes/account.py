@@ -7,7 +7,9 @@ from pydantic import BaseModel, EmailStr
 from xcore.kernel.api import AuthPayload, get_current_user
 
 from ..repositories.user import UserRepository
+from ..services.audit import AuditService
 from ..services.auth.password import _check_password_policy, get_pwd_context
+from ..services.auth.username import normalize_username
 from ..services.mfa import MFAService
 
 from ..services.events import XAuthEvents
@@ -16,6 +18,12 @@ from ..services.auth.session import SessionService as Ss
 if TYPE_CHECKING:
     from ..services.token import TokenService
     from xcore.kernel.events import EventBus as EB
+
+class ChangeUsernameRequest(BaseModel):
+    username: str
+    password: str
+    opt_code: str | None = None
+
 
 class ChangeEmailRequest(BaseModel):
     new_email: EmailStr
@@ -31,6 +39,40 @@ class ChangePasswordRequest(BaseModel):
 
 def account_router(db: Any, call_plugin:Callable, event_bus:Optional["EB"]=None, token_service:Optional["TokenService"]=None) -> APIRouter:
     router = APIRouter(prefix="/account", tags=["account"])
+
+    @router.patch("/username", status_code=status.HTTP_200_OK)
+    async def change_username(
+        body: ChangeUsernameRequest,
+        user: AuthPayload = Depends(get_current_user),
+    ) -> Any:
+        """Choisit ou change son nom d'utilisateur (une seconde façon de se connecter). Mêmes garanties que le changement d'adresse : mot de passe, et code OTP si la MFA est active."""
+        try:
+            name = normalize_username(body.username)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        async with db.session() as session:
+            repo = UserRepository(session)
+            u = await repo.get(user["sub"])
+            if not u:
+                raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+            if u.mfa_enabled:
+                if not body.opt_code:
+                    raise HTTPException(status_code=400, detail="Code OTP requis pour changer le nom d'utilisateur")
+                if not await MFAService(session).verify_totp(user_id=u.id, code=body.opt_code):
+                    raise HTTPException(status_code=400, detail="Code OTP incorrect")
+            if not u.hashed_password or not get_pwd_context().verify(body.password, u.hashed_password):
+                raise HTTPException(status_code=400, detail="Mot de passe incorrect")
+            taken = await repo.get_by_username(name)
+            if taken and taken.id != u.id:
+                raise HTTPException(status_code=409, detail="Ce nom d'utilisateur est déjà pris")
+            if u.username != name:
+                previous = u.username
+                u.username = name
+                await AuditService(session).log_event(
+                    action="user.username_changed", user_id=u.id, resource="user", resource_id=u.id, metadata={"from": previous, "to": name}
+                )
+            await session.commit()
+            return {"username": u.username}
 
     @router.patch("/email", status_code=status.HTTP_200_OK)
     async def change_email(

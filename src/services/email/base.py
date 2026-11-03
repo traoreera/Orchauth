@@ -29,10 +29,13 @@ class EmailTransport:
     avant d'être transmis au transport xcore.
     """
 
-    def __init__(self, email_ext: Any, app_base_url: str, app_name: str) -> None:
+    def __init__(self, email_ext: Any, app_base_url: str, app_name: str, desk_url: str | None = None) -> None:
         self._ext = email_ext
         self.base_url = app_base_url.rstrip("/")
         self.app_name = app_name
+        # Pages web du Desk : les liens d'e-mail (invitation, réinitialisation, bienvenue) y mènent directement, sans deep-link `erp://`.
+        # Défaut : le Desk servi par ce dépôt sous le préfixe habituel `/app` ; à régler via `app.desk_url` si le préfixe diffère.
+        self.desk_url = (desk_url or f"{self.base_url}/app/xcore-doctype/desk/").rstrip("/") + "/"
 
     async def send(
         self,
@@ -44,6 +47,7 @@ class EmailTransport:
         context.setdefault("app_name", self.app_name)
         context.setdefault("base_url", self.base_url)
         context.setdefault("support_url", f"{self.base_url}/support")
+        context.setdefault("desk_url", self.desk_url)
 
         html = _render(template, context)
         return await self._ext.send(
@@ -62,5 +66,6 @@ class EmailTransport:
         context.setdefault("app_name", self.app_name)
         context.setdefault("base_url", self.base_url)
         context.setdefault("support_url", f"{self.base_url}/support")
+        context.setdefault("desk_url", self.desk_url)
         html = _render(template, context)
         return self._ext.queue(to=to, subject=subject, body=html, is_html=True)

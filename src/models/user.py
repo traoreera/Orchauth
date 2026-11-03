@@ -24,6 +24,9 @@ class User(Base):
         String(36), primary_key=True, default=lambda: str(uuid4())
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    # Nom d'utilisateur : une seconde façon de se connecter (minuscules, voir services/auth/username.py). Nullable : les comptes anciens ou OAuth n'en ont pas.
+    # Unique : le nom de l'index est celui de utils/db_upgrade.py (une base ancienne le reçoit de lui), `create_all` le crée sur une base neuve.
+    username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     # Nullable — les users OAuth n'ont pas forcément de mot de passe
     hashed_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -34,7 +37,10 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=True
     )
 
-    __table_args__ = (Index("ix_xauth_user_email", "email"),)
+    __table_args__ = (
+        Index("ix_xauth_user_email", "email"),
+        Index("ux_xauth_users_username", "username", unique=True),
+    )
 
     @property
     def has_password(self) -> bool:

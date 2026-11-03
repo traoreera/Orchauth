@@ -13,7 +13,6 @@ from .invite import Invite
 from .audit import AuditLog
 from .oauth import OAuthAccount
 from .notification import Notification
-from .license import TenantModule
 
 __all__ = [
     "Base",
@@ -30,5 +29,4 @@ __all__ = [
     "AuditLog",
     "OAuthAccount",
     "Notification",
-    "TenantModule",
 ]

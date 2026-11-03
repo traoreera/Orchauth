@@ -22,8 +22,8 @@ class AuthEmailService:
         email_ext.add_template("welcome", "<html>...</html>")
     """
 
-    def __init__(self, email_ext: Any, app_base_url: str, app_name: str) -> None:
+    def __init__(self, email_ext: Any, app_base_url: str, app_name: str, desk_url: str | None = None) -> None:
         self._ext = email_ext
-        self.auth = AuthEmailSender(email_ext, app_base_url, app_name)
-        self.invite = InviteEmailSender(email_ext, app_base_url, app_name)
-        self.password = PasswordEmailSender(email_ext, app_base_url, app_name)
+        self.auth = AuthEmailSender(email_ext, app_base_url, app_name, desk_url)
+        self.invite = InviteEmailSender(email_ext, app_base_url, app_name, desk_url)
+        self.password = PasswordEmailSender(email_ext, app_base_url, app_name, desk_url)

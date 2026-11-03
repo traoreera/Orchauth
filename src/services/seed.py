@@ -13,6 +13,7 @@ from ..repositories.rbac import PermissionRepository, RoleRepository
 from ..repositories.tenant import TenantRepository
 from ..repositories.user import TenantMemberRepository, UserRepository
 from .auth.password import get_pwd_context
+from .auth.username import derive_username, normalize_username
 
 logger = get_logger("xauth.seed")
 
@@ -154,6 +155,10 @@ USER_PERMISSIONS: list[str] = [
     "rating:create",
     "user:read",
 ]
+
+# Le rôle qui administre UNE organisation (invitations, membres, rôles, permissions de cette organisation). Nommé ici
+# parce que c'est ici qu'il est créé et garni ; lu par `RoleService` et par `routes/_scope`.
+TENANT_ADMIN_ROLE = "tenant_admin"
 
 # Propriétaire d'un tenant — gestion de SON tenant, pas de privilèges plateforme.
 TENANT_ADMIN_PERMISSIONS: list[str] = [
@@ -307,11 +312,15 @@ async def seed_user_role(
 async def seed_tenant_admin_role(
     session: AsyncSession,
     permissions: dict[str, Permission],
-    role_name: str = "tenant_admin",
+    role_name: str = TENANT_ADMIN_ROLE,
 ) -> Role:
     """
     Rôle global attribué au propriétaire d'un tenant : gère son tenant sans
     aucun privilège plateforme (pas de admin:*). Distinct du rôle 'admin'.
+
+    C'est AUSSI le rôle de la délégation : un administrateur d'organisation le donne à un membre pour en faire un
+    administrateur (`routes/_scope.require_tenant_admin`). Il est donc le seul rôle global qu'une organisation
+    puisse attribuer — jamais modifier (`RoleService._get_assignable_role`).
     """
     role_repo = RoleRepository(session)
     existing_roles = await role_repo.list_for_tenant(None)
@@ -343,12 +352,27 @@ async def seed_admin_user(
     user_repo = UserRepository(session)
     member_repo = TenantMemberRepository(session)
 
+    # Nom d'utilisateur de l'administrateur : `ADMIN_USERNAME` (facultatif), sinon dérivé de son adresse (`admin@acme.test` -> `admin`).
+    # Un nom déjà pris par un autre compte, ou invalide, n'empêche jamais le démarrage : l'administrateur se connecte alors par son adresse.
+    wanted = cfg.get("ADMIN_USERNAME")
+    try:
+        username = normalize_username(wanted) if wanted else derive_username(cfg["ADMIN_EMAIL"])
+    except ValueError:
+        logger.warning("ADMIN_USERNAME invalide : ignoré (l'administrateur se connecte par son adresse)")
+        username = None
+
     user = await user_repo.get_by_email(cfg["ADMIN_EMAIL"])
     if user is None:
         hashed = get_pwd_context().hash(cfg["ADMIN_PASSWORD"])
         user = User(email=cfg["ADMIN_EMAIL"], hashed_password=hashed, is_active=True)
         await user_repo.save(user)
         logger.info("Admin user created: %s", cfg["ADMIN_EMAIL"])
+    if username and user.username is None:
+        owner = await user_repo.get_by_username(username)
+        if owner is None:
+            user.username = username
+            await session.flush()
+            logger.info("Admin username set: %s", username)
 
     membership = await member_repo.get_membership(user.id, tenant.id)
     if membership is None:
@@ -376,11 +400,16 @@ async def get_default_user_role(db: Any, user_role_name: str = "user") -> Role |
         return next((r for r in roles if r.name == user_role_name), None)
 
 
-async def run_seed(db: Any, cfg: dict) -> None:
+async def run_seed(db: Any, cfg: dict) -> str | None:
     """
     Point d'entrée principal — appelé depuis Plugin.on_load.
     cfg est construit par _build_seed_cfg() dans main.py (plugin.yaml > env vars).
+
+    Rend l'identifiant de l'organisation amorcée : l'appelant annonce sa création quand tout le parc est
+    chargé, pour que les plugins qui en dépendent (xlicense et son essai) la traitent comme n'importe quelle
+    autre organisation. L'annoncer ici serait trop tôt — personne n'écoute encore.
     """
+    seeded: str | None = None
     async with db.session() as session:
         try:
             permissions = await seed_permissions(session)
@@ -390,6 +419,7 @@ async def run_seed(db: Any, cfg: dict) -> None:
             await seed_tenant_admin_role(session, permissions)
             await seed_admin_user(session, tenant, admin_role, cfg)
             await session.commit()
+            seeded = str(tenant.id)
             logger.info(
                 "Seed complete — %d permissions, admin+user roles created",
                 len(permissions),
@@ -414,6 +444,8 @@ async def run_seed(db: Any, cfg: dict) -> None:
     except Exception:
         logger.warning("Invitation cleanup failed (non-blocking)", exc_info=True)
 
+    return seeded
+
 
 def build_seed_cfg(seed_yaml: dict, env: dict) -> dict:
     fields = {
@@ -432,6 +464,10 @@ def build_seed_cfg(seed_yaml: dict, env: dict) -> dict:
             missing.append(f"seed.{yaml_key}")
         else:
             result[env_key] = value
+    # Facultatif : sans lui, le nom de l'administrateur est dérivé de son adresse (voir seed_admin_user).
+    optional = env.get("ADMIN_USERNAME") or seed_yaml.get("admin_username")
+    if optional:
+        result["ADMIN_USERNAME"] = optional
     if missing:
         raise RuntimeError(
             "[xauth] Incomplete seed configuration — missing fields in plugin.yaml: "

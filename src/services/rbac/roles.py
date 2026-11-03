@@ -8,6 +8,7 @@ from xcore.sdk import get_logger
 from ...models.rbac import Role
 from ...repositories.rbac import PermissionRepository, RoleRepository
 from ...repositories.user import TenantMemberRepository
+from ..seed import TENANT_ADMIN_ROLE
 
 logger = get_logger("xauth.rbac.roles")
 
@@ -78,7 +79,7 @@ class RoleService:
         if membership is None:
             raise ValueError("User is not a member of this tenant")
 
-        await self._get_owned_role(tenant_id, role_id)
+        await self._get_assignable_role(tenant_id, role_id)
 
         membership.role_id = role_id
         await self._session.flush()
@@ -100,16 +101,19 @@ class RoleService:
         role = await role_repo.save(role)
         role = await role_repo.get_with_permissions(role.id)
 
+        # Une permission demandée mais écartée en SILENCE fait croire au propriétaire qu'il l'a donnée : le rôle est créé,
+        # l'écran ne dit rien, et le membre n'a pas le droit. On refuse explicitement — `add_permission_to_tenant_role` le
+        # fait déjà de son côté, les deux chemins disent donc la même chose.
         for pname in permission_names or []:
             perm = await perm_repo.get_by_name(pname)
             if perm is None or not perm.active or not perm.tenant_grantable:
-                continue
+                raise ValueError(f"Permission inconnue, inactive ou non délégable : {pname}")
             if (
                 entitled_plugins is not None
                 and perm.source_plugin is not None
                 and perm.source_plugin not in entitled_plugins
             ):
-                continue
+                raise ValueError(f"Le tenant n'a pas accès au plugin de cette permission : {pname}")
             if perm not in role.permissions:
                 role.permissions.append(perm)
         await self._session.flush()
@@ -126,12 +130,28 @@ class RoleService:
         return out
 
     async def _get_owned_role(self, tenant_id: str, role_id: str) -> Role:
+        """Un rôle que l'organisation POSSÈDE : le seul qu'elle puisse modifier, garnir ou supprimer."""
         role = await RoleRepository(self._session).get_with_permissions(role_id)
         if role is None:
             raise ValueError("Rôle introuvable")
         if role.tenant_id != tenant_id:
             raise ValueError("Ce rôle n'appartient pas à votre tenant")
         return role
+
+    async def _get_assignable_role(self, tenant_id: str, role_id: str) -> Role:
+        """Un rôle que l'organisation peut ATTRIBUER à un membre : les siens, plus le rôle global `tenant_admin`.
+
+        Ce dernier existe précisément pour être délégué — c'est le geste par lequel un administrateur en fait un
+        autre (`routes/_scope.require_tenant_admin`). Les autres rôles globaux restent hors de portée, `admin` et son
+        `admin:*` en tête. Attribuer n'est pas MODIFIER : garnir ou supprimer un rôle passe par `_get_owned_role`,
+        sinon une organisation changerait un rôle global, donc toutes les autres.
+        """
+        role = await RoleRepository(self._session).get_with_permissions(role_id)
+        if role is None:
+            raise ValueError("Rôle introuvable")
+        if role.tenant_id == tenant_id or (role.tenant_id is None and role.name == TENANT_ADMIN_ROLE):
+            return role
+        raise ValueError("Ce rôle n'appartient pas à votre tenant")
 
     async def add_permission_to_tenant_role(
         self,

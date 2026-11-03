@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from xcore.kernel.api import AuthPayload, get_current_user
 from xcore.sdk import require_permission
 
-from ..repositories.user import TenantMemberRepository
+from ._scope import require_tenant_admin
 from ..services.rbac import (
     MemberRoleService,
     PermissionService,
@@ -28,22 +28,14 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
     async def _require_tenant_admin(
         tenant_id: str, user: AuthPayload
     ) -> None:
-        """Scope owner : admin plateforme (admin:*) OU owner du tenant ciblé.
+        """Administrer CE tenant : admin plateforme, propriétaire, ou porteur du rôle `tenant_admin` (voir `_scope`).
 
-        Remplace le gate global `rbac:write` pour les opérations déléguées :
-        le owner gère SON tenant sans pouvoir toucher aux autres.
+        Remplace le gate global `rbac:write` pour les opérations déléguées : un administrateur gère SON organisation
+        — ses membres, ses rôles, ses permissions — sans pouvoir toucher aux autres. Les permissions non délégables
+        restent hors de portée (`create_tenant_role`, `grant_permission_to_member` les refusent).
         """
-        if "admin:*" in (user.get("permissions", []) or []):
-            return
         async with db.session() as session:
-            membership = await TenantMemberRepository(session).get_membership(
-                user["sub"], tenant_id
-            )
-        if membership is None or not membership.is_owner:
-            raise HTTPException(
-                status_code=403,
-                detail="Réservé au propriétaire du tenant.",
-            )
+            await require_tenant_admin(session, user, tenant_id)
 
     @router.post(
         "/roles",
@@ -174,8 +166,13 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
     async def get_user_permissions(
         user_id: str,
         tenant_id: str,
-        _: AuthPayload = Depends(require_permission("rbac:read")),
+        user: AuthPayload = Depends(require_permission("rbac:read")),
     ) -> Any:
+        """`rbac:read` est délégable et porté par le rôle `tenant_admin` : sans portée, le propriétaire de
+        l'organisation A lisait les droits effectifs de n'importe qui dans l'organisation B. Même porte que les
+        autres lectures RBAC d'une organisation (`_require_tenant_admin` : admin plateforme ou propriétaire DE CELLE-CI).
+        """
+        await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
             return await PermissionService(session, cache=cache).get_permissions_for_user(user_id, tenant_id)
 
@@ -229,16 +226,9 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
     ) -> Any:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
-            # Un module PAYANT auquel l'organisation n'est pas abonnée n'offre pas ses droits à déléguer (services/licensing.py) :
-            # ils seraient de toute façon retirés au calcul des droits du membre.
-            from ..services.licensing import LicenseService, paid_modules
-
-            perms = await PermissionService(session, cache=cache).list_grantable_permissions()
-            paid = paid_modules()
-            if paid:
-                entitled = await LicenseService(session).entitled(tenant_id)
-                perms = [p for p in perms if p.name.split(":", 1)[0] not in paid or p.name.split(":", 1)[0] in entitled]
-            return perms
+            # entitled_plugins=None pour l'instant (intersection entitlement
+            # xlicense = hook à venir). Renvoie tout ce qui est délégable.
+            return await PermissionService(session, cache=cache).list_grantable_permissions()
 
     @router.post(
         "/tenants/{tenant_id}/roles",
@@ -254,12 +244,17 @@ def rbac_router(db: Any, cache: Any = None) -> APIRouter:
         await _require_tenant_admin(tenant_id, user)
         async with db.session() as session:
             svc = RoleService(session, cache=cache)
-            role = await svc.create_tenant_role(
-                tenant_id=tenant_id,
-                name=body.name,
-                permission_names=body.permissions,
-                description=body.description,
-            )
+            try:
+                role = await svc.create_tenant_role(
+                    tenant_id=tenant_id,
+                    name=body.name,
+                    permission_names=body.permissions,
+                    description=body.description,
+                )
+            except ValueError as exc:
+                # Une permission non délégable est désormais refusée (et non plus ignorée en silence) : il faut le DIRE,
+                # comme le fait déjà l'ajout de permission à un rôle existant.
+                raise HTTPException(status_code=400, detail=str(exc))
             await session.commit()
             role = await svc.get_role(role.id)
             return RoleResponse.model_validate(role)

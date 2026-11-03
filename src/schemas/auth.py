@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, model_validator
 
 
 class TenantInfo(BaseModel):
@@ -16,13 +16,30 @@ class SelectTenantRequest(BaseModel):
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
+    username: Optional[str] = None  # facultatif : une seconde façon de se connecter (services/auth/username.py)
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    """On se connecte avec une adresse e-mail OU un nom d'utilisateur. `email` accepte aussi un nom (anciens clients : l'écran de connexion y mettait ce que
+    l'on tapait) ; `username` est la forme explicite. Ce qui contient `@` est une adresse, le reste un nom : voir `identifier`."""
+
+    email: Optional[str] = None
+    username: Optional[str] = None
     password: str
     tenant_id: Optional[str] = None
     device_fingerprint: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _one_identifier(self) -> "LoginRequest":
+        if not (self.username or self.email or "").strip():
+            raise ValueError("Adresse e-mail ou nom d'utilisateur requis")
+        if len(self.identifier) > 255:
+            raise ValueError("Identifiant trop long")
+        return self
+
+    @property
+    def identifier(self) -> str:
+        return (self.username or self.email or "").strip()
 
 
 class RefreshRequest(BaseModel):
@@ -59,6 +76,7 @@ class TokenResponse(BaseModel):
 class UserResponse(BaseModel):
     id: str
     email: str
+    username: Optional[str] = None
     is_active: bool
     mfa_enabled: bool
     has_password: bool = False

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import selectinload
 
 from ..models.user import User, TenantMember
@@ -18,6 +18,22 @@ class UserRepository(BaseRepository[User]):
             select(User).where(User.email == email)
         )
         return result.scalar_one_or_none()
+
+    async def get_by_username(self, username: str) -> Optional[User]:
+        result = await self.session.execute(
+            select(User).where(User.username == username.strip().lower())
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_identifier(self, identifier: str) -> Optional[User]:
+        """Pour la connexion : ce qui contient `@` est une adresse (comparée sans tenir compte de la casse), le reste un nom d'utilisateur."""
+        ident = identifier.strip()
+        if "@" in ident:
+            result = await self.session.execute(
+                select(User).where(func.lower(User.email) == ident.lower())
+            )
+            return result.scalars().first()
+        return await self.get_by_username(ident)
 
     async def get_with_memberships(self, user_id: str) -> Optional[User]:
         result = await self.session.execute(

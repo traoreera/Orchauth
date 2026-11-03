@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from typing import Optional
 
 from xcore.sdk import (
@@ -129,6 +130,37 @@ class IPCCommands(AutoDispatchMixin):
         except Exception as exc:
             return error(str(exc), code="error")
 
+    @action("xauth.user.permissions")
+    @schema(
+        version="1.0",
+        input={"user_id": (str, ...), "tenant_id": (str, ...)},
+        output={"permissions": list},
+        type_response="model",
+        unset=False,
+    )
+    async def _ipc_user_permissions(self, payload) -> dict:
+        """Les grants EFFECTIFS d'un utilisateur dans une organisation, pour un plugin de confiance.
+
+        Pourquoi : un travail différé (un workflow planifié, une reprise après redémarrage) n'a plus de requête, donc plus
+        d'identité. Plutôt que de STOCKER les permissions de celui qui a déclenché — une capacité figée, qui survivrait à son
+        départ — l'appelant ne garde que son identifiant et redemande ses droits À CHAQUE exécution. Un compte désactivé ou un
+        grant retiré arrête donc le traitement, au lieu de le laisser courir avec les droits d'hier.
+
+        Ne rend QUE la liste des grants : aucune décision, aucun effet de bord. C'est exactement ce que la route HTTP
+        `/rbac/users/{id}/tenants/{tid}/permissions` sert déjà à qui détient `rbac:read`. L'accès est borné par
+        `allowed_callers` du manifeste : seuls les plugins qui y sont nommés peuvent l'appeler.
+        """
+        from .services.rbac.permissions import PermissionService
+        try:
+            async with self._db.session() as session:
+                perms = await PermissionService(session, cache=self._cache).get_permissions_for_user(
+                    payload.user_id, payload.tenant_id
+                )
+            return ok(permissions=list(perms or []))
+        except Exception:
+            logger.exception("xauth.user.permissions failed")  # jamais le détail vers un autre plugin
+            return error("Erreur interne d'xauth", code="error")
+
     @action("xauth.get_tenant")
     @schema(
         version="1.0",
@@ -172,8 +204,21 @@ class IPCCommands(AutoDispatchMixin):
                 membership = await member_repo.get_membership(payload.user_id, payload.tenant_id)
                 if membership is None:
                     return ok(has_access=False, can_manage=False)
-                can_manage = bool(membership.is_owner) or any(
-                    p in perms for p in ("license:write", "license:manage")
+                # Gérer la licence et choisir les modules de SON organisation est une opération
+                # d'administration de celle-ci : le rôle `tenant_admin` l'ouvre, comme pour les
+                # invitations, les membres et les rôles (`routes/_scope.require_tenant_admin`).
+                # Sur le seul `is_owner`, l'administrateur à qui le propriétaire avait délégué
+                # l'organisation ne pouvait pas prendre un module.
+                from .services.rbac.members import MemberRoleService
+                from .services.seed import TENANT_ADMIN_ROLE
+
+                roles = await MemberRoleService(session).get_roles_for_user(
+                    payload.user_id, payload.tenant_id
+                )
+                can_manage = (
+                    bool(membership.is_owner)
+                    or TENANT_ADMIN_ROLE in roles
+                    or any(p in perms for p in ("license:write", "license:manage"))
                 )
                 return ok(has_access=True, can_manage=can_manage)
         except Exception as exc:
@@ -272,6 +317,44 @@ class IPCCommands(AutoDispatchMixin):
             "email":user.user.email 
             }for user in users])
 
+
+    @action("xauth.notify")
+    async def _ipc_notify(self, payload):
+        """Une notification (la cloche du Desk) pour des membres d'une organisation, à la demande d'un plugin de confiance (`allowed_callers`).
+
+        Seuls les membres de `tenant_id` reçoivent : un identifiant qui n'en est pas membre est ignoré en silence (on ne dit pas qui existe ailleurs). Le texte est
+        celui de l'appelant, le lien n'est suivi par le Desk que s'il commence par `#/` ou `https://` (même règle que `routes/notifications.py`).
+        """
+        from .models.notification import Notification
+        from .repositories.notification import NotificationRepository
+        from .repositories.user import TenantMemberRepository
+
+        data = payload if isinstance(payload, dict) else {}
+        tenant_id, title = data.get("tenant_id"), data.get("title")
+        users = data.get("user_ids")
+        if not isinstance(tenant_id, str) or not tenant_id or not isinstance(title, str) or not title.strip():
+            return error("tenant_id et title sont obligatoires", code="invalid")
+        if not isinstance(users, list) or not users or len(users) > 50 or not all(isinstance(u, str) and u for u in users):
+            return error("user_ids : une liste de 1 à 50 identifiants", code="invalid")
+        message, link, kind = data.get("message"), data.get("link"), data.get("type") or "DOCUMENT"
+        if message is not None and (not isinstance(message, str) or len(message) > 2000):
+            return error("message : un texte de 2000 caractères au plus", code="invalid")
+        if link is not None and (not isinstance(link, str) or len(link) > 512 or not (link.startswith("#/") or link.startswith("https://"))):
+            return error("link : #/… ou https://…", code="invalid")
+        if not isinstance(kind, str) or not kind.replace("_", "").isalnum() or len(kind) > 32:
+            return error("type invalide", code="invalid")
+        try:
+            async with self._db.session() as sess:
+                members = {m.user_id for m in await TenantMemberRepository(sess).get_members_of_tenant(tenant_id)}
+                targets = [u for u in dict.fromkeys(users) if u in members]
+                repo = NotificationRepository(sess)
+                for user_id in targets:
+                    await repo.save(Notification(user_id=user_id, tenant_id=tenant_id, title=title.strip()[:255], message=message, type=kind.upper(), link=link))
+                await sess.commit()
+        except Exception:  # noqa: BLE001 - jamais le détail (SQL) vers un autre plugin
+            logger.exception("xauth.notify failed")
+            return error("Erreur interne d'xauth", code="error")
+        return ok(sent=len(targets))
 
     @action("xauth.users.change.status")
     @schema(
@@ -1031,6 +1114,174 @@ class IPCCommands(AutoDispatchMixin):
             return ok(calendars=data.get("calendars", {}))
         except Exception as exc:
             return self._google_error(exc, "xauth.google.calendar.query_freebusy", payload.user_id)
+
+    # ── Drive : fichiers (scope drive.file — voir providers/google.py) ──────
+
+    @action("xauth.google.drive.list_files")
+    @schema(
+        version="1.0",
+        input={
+            "user_id": (str, ...), "query": (Optional[str], None),
+            "page_size": (int, 100), "page_token": (Optional[str], None),
+        },
+        output={"files": (list, []), "next_page_token": (Optional[str], None)},
+        type_response="model", unset=False,
+    )
+    async def _ipc_google_drive_list_files(self, payload):
+        try:
+            data = await self._google_call(
+                payload.user_id, "list_files",
+                query=getattr(payload, "query", None),
+                page_size=getattr(payload, "page_size", 100) or 100,
+                page_token=getattr(payload, "page_token", None),
+            ) or {}
+            return ok(files=data.get("files", []), next_page_token=data.get("nextPageToken"))
+        except Exception as exc:
+            return self._google_error(exc, "xauth.google.drive.list_files", payload.user_id)
+
+    @action("xauth.google.drive.get_file_metadata")
+    @schema(
+        version="1.0", input={"user_id": (str, ...), "file_id": (str, ...)},
+        output={"file": (Optional[dict], None)}, type_response="model", unset=False,
+    )
+    async def _ipc_google_drive_get_file_metadata(self, payload):
+        try:
+            file = await self._google_call(payload.user_id, "get_file_metadata", payload.file_id)
+            return ok(file=file)
+        except Exception as exc:
+            return self._google_error(exc, "xauth.google.drive.get_file_metadata", payload.user_id)
+
+    @action("xauth.google.drive.download_file")
+    @schema(
+        version="1.0", input={"user_id": (str, ...), "file_id": (str, ...)},
+        output={"data": (Optional[str], None)}, type_response="model", unset=False,
+    )
+    async def _ipc_google_drive_download_file(self, payload):
+        """`data` : contenu encodé en base64 — le binaire brut ne traverse
+        pas la frontière IPC/JSON. Pour un fichier binaire classique (PDF,
+        image…) ; utiliser `export_file` pour un document Google natif."""
+        try:
+            content = await self._google_call(payload.user_id, "download_file", payload.file_id)
+            return ok(data=base64.b64encode(content).decode() if content else None)
+        except Exception as exc:
+            return self._google_error(exc, "xauth.google.drive.download_file", payload.user_id)
+
+    @action("xauth.google.drive.export_file")
+    @schema(
+        version="1.0",
+        input={"user_id": (str, ...), "file_id": (str, ...), "mime_type": (str, ...)},
+        output={"data": (Optional[str], None)}, type_response="model", unset=False,
+    )
+    async def _ipc_google_drive_export_file(self, payload):
+        """Exporte un document Google natif (Docs/Sheets/Slides) dans
+        `mime_type` (ex. "application/pdf") — `data` encodé en base64."""
+        try:
+            content = await self._google_call(
+                payload.user_id, "export_file", payload.file_id, payload.mime_type
+            )
+            return ok(data=base64.b64encode(content).decode() if content else None)
+        except Exception as exc:
+            return self._google_error(exc, "xauth.google.drive.export_file", payload.user_id)
+
+    @action("xauth.google.drive.create_file")
+    @schema(
+        version="1.0",
+        input={
+            "user_id": (str, ...), "name": (str, ...), "content": (str, ...),
+            "mime_type": (str, ...), "parents": (Optional[list], None),
+        },
+        output={"file": (Optional[dict], None)}, type_response="model", unset=False,
+    )
+    async def _ipc_google_drive_create_file(self, payload):
+        """`content` : contenu du fichier encodé en base64."""
+        try:
+            raw = base64.b64decode(payload.content)
+            file = await self._google_call(
+                payload.user_id, "create_file", payload.name, raw, payload.mime_type,
+                parents=getattr(payload, "parents", None),
+            )
+            return ok(file=file)
+        except Exception as exc:
+            return self._google_error(exc, "xauth.google.drive.create_file", payload.user_id)
+
+    @action("xauth.google.drive.update_file")
+    @schema(
+        version="1.0",
+        input={
+            "user_id": (str, ...), "file_id": (str, ...), "name": (Optional[str], None),
+            "content": (Optional[str], None), "mime_type": (Optional[str], None),
+            "add_parents": (Optional[list], None), "remove_parents": (Optional[list], None),
+        },
+        output={"file": (Optional[dict], None)}, type_response="model", unset=False,
+    )
+    async def _ipc_google_drive_update_file(self, payload):
+        """`content` (base64) requiert `mime_type` — voir DriveMixin.update_file."""
+        try:
+            content = getattr(payload, "content", None)
+            raw = base64.b64decode(content) if content else None
+            file = await self._google_call(
+                payload.user_id, "update_file", payload.file_id,
+                name=getattr(payload, "name", None), content=raw,
+                mime_type=getattr(payload, "mime_type", None),
+                add_parents=getattr(payload, "add_parents", None),
+                remove_parents=getattr(payload, "remove_parents", None),
+            )
+            return ok(file=file)
+        except Exception as exc:
+            return self._google_error(exc, "xauth.google.drive.update_file", payload.user_id)
+
+    @action("xauth.google.drive.create_folder")
+    @schema(
+        version="1.0",
+        input={"user_id": (str, ...), "name": (str, ...), "parents": (Optional[list], None)},
+        output={"file": (Optional[dict], None)}, type_response="model", unset=False,
+    )
+    async def _ipc_google_drive_create_folder(self, payload):
+        try:
+            folder = await self._google_call(
+                payload.user_id, "create_folder", payload.name,
+                parents=getattr(payload, "parents", None),
+            )
+            return ok(file=folder)
+        except Exception as exc:
+            return self._google_error(exc, "xauth.google.drive.create_folder", payload.user_id)
+
+    @action("xauth.google.drive.trash_file")
+    @schema(
+        version="1.0", input={"user_id": (str, ...), "file_id": (str, ...)},
+        output={"file": (Optional[dict], None)}, type_response="model", unset=False,
+    )
+    async def _ipc_google_drive_trash_file(self, payload):
+        try:
+            file = await self._google_call(payload.user_id, "trash_file", payload.file_id)
+            return ok(file=file)
+        except Exception as exc:
+            return self._google_error(exc, "xauth.google.drive.trash_file", payload.user_id)
+
+    @action("xauth.google.drive.untrash_file")
+    @schema(
+        version="1.0", input={"user_id": (str, ...), "file_id": (str, ...)},
+        output={"file": (Optional[dict], None)}, type_response="model", unset=False,
+    )
+    async def _ipc_google_drive_untrash_file(self, payload):
+        try:
+            file = await self._google_call(payload.user_id, "untrash_file", payload.file_id)
+            return ok(file=file)
+        except Exception as exc:
+            return self._google_error(exc, "xauth.google.drive.untrash_file", payload.user_id)
+
+    @action("xauth.google.drive.delete_file")
+    @schema(
+        version="1.0", input={"user_id": (str, ...), "file_id": (str, ...)},
+        output={"deleted": (bool, False)}, type_response="model", unset=False,
+    )
+    async def _ipc_google_drive_delete_file(self, payload):
+        """Suppression PERMANENTE — préférer `trash_file`."""
+        try:
+            await self._google_call(payload.user_id, "delete_file", payload.file_id)
+            return ok(deleted=True)
+        except Exception as exc:
+            return self._google_error(exc, "xauth.google.drive.delete_file", payload.user_id)
 
     # ── Rôles / permissions — IPC serveur-à-serveur ──────────────────────────
     #

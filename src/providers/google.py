@@ -17,12 +17,19 @@ class GoogleProvider(OAuthProvider):
     # calendar : accès complet Calendar (agendas + calendarList + events),
     # plus large que calendar.events pour couvrir create/update/delete
     # calendar et calendarList côté GoogleServiceClient.
+    # drive.file : lecture/écriture limitée aux fichiers créés OU ouverts
+    # par l'app (scope "non sensible", pas de vérification Google/CASA
+    # requise) — contrairement à `drive` (accès à tout le Drive), volontai-
+    # rement pas demandé pour éviter la vérification en prod. Voir
+    # DriveMixin.list_files pour la conséquence : seuls les fichiers créés
+    # via ce scope apparaissent, pas l'ensemble du Drive de l'utilisateur.
     scopes = [
         "openid",
         "email",
         "profile",
         "https://www.googleapis.com/auth/gmail.modify",
         "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/drive.file",
     ]
 
     def get_auth_url(self, state: str, extra_params=None) -> str:

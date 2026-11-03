@@ -26,7 +26,6 @@ from ..services.auth import (
 from ..services.email import AuthEmailService
 from ..services.events import XAuthEvents
 from ..services.token import TokenService
-from ..utils.deeplink import wrap_bridge
 from ..utils.http import get_client_ip
 from ..utils.rate_limit import RateLimiter
 
@@ -38,6 +37,8 @@ def auth_router(
     events: XAuthEvents | None = None,
     cache=None,
     user_role_name: str = "user",
+    # Le nom du rôle d'administration de la PLATEFORME (seed). Il ne doit JAMAIS servir à donner un rôle à qui crée
+    # son organisation : celui-là reçoit `tenant_admin` (voir `/setup/create` plus bas).
     admin_role_name: str = "admin",
 ) -> APIRouter:
     router = APIRouter(tags=["auth"])
@@ -56,6 +57,7 @@ def auth_router(
                 user = await svc.register(
                     email=body.email,
                     password=body.password,
+                    username=body.username,
                 )
                 await session.commit()
                 await session.refresh(user)
@@ -64,11 +66,9 @@ def auth_router(
                     subject=f"Bienvenue sur {email_service.auth.app_name}",
                     template="welcome",
                     context={
-                        "username": user.email,
-                        # Auparavant une URL de l'API JSON sans page /login
-                        # (auth Constat 9) — désormais un deep-link erp://login
-                        # emballé dans la page de rebond https.
-                        "login_url": wrap_bridge(email_service.auth.base_url, "erp://login"),
+                        "username": user.username or user.email,
+                        # Lien WEB vers la page de connexion du Desk (jamais un deep-link `erp://`).
+                        "login_url": f"{email_service.auth.desk_url}#/login",
                     },
                 )
                 return user
@@ -82,7 +82,7 @@ def auth_router(
             svc = AuthenticationService(session, token_service, events, cache=cache)
             try:
                 result = await svc.login(
-                    email=body.email,
+                    identifier=body.identifier,
                     password=body.password,
                     tenant_id=body.tenant_id,
                     ip_address=ip,
@@ -128,7 +128,12 @@ def auth_router(
     async def setup_create(body: SetupCreateRequest, request: Request):
         ip = get_client_ip(request)
         async with db.session() as session:
-            svc = OnboardingService(session, token_service, events, owner_role_name=admin_role_name)
+            # Celui qui crée son organisation reçoit `tenant_admin` (le défaut du service), JAMAIS le rôle `admin` de
+            # la plateforme : la seed garnit ce dernier de TOUTES les permissions, `admin:*` comprise
+            # (`services/seed.seed_admin_role`). En passant `admin_role_name` ici, n'importe quel compte qui
+            # s'inscrivait puis créait une organisation devenait administrateur de la PLATEFORME. `POST /tenants/`,
+            # l'autre chemin de création, cherchait déjà `tenant_admin` nommément.
+            svc = OnboardingService(session, token_service, events)
             try:
                 result = await svc.setup_create_tenant(
                     refresh_token=body.refresh_token,

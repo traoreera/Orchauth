@@ -10,7 +10,7 @@ from .password import password_router
 from .account import account_router
 from .notifications import notifications_router
 from .bridge import bridge_router
-from .licenses import licenses_router
+from .mail import mail_router
 from ..utils.deeplink import wrap_bridge
 
 __all__ = [
@@ -26,6 +26,6 @@ __all__ = [
     "account_router",
     "notifications_router",
     "bridge_router",
-    "licenses_router",
+    "mail_router",
     "wrap_bridge",
 ]

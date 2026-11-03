@@ -9,23 +9,23 @@ execution_mode: trusted
 entry_point: src/main.py
 framework_version: ">=2.0.0"
 
+# Qui peut appeler les actions d'xauth par IPC (l'hôte active `enforce_ipc`) : le moteur de DocTypes lit l'annuaire des membres d'une organisation
+# (`xauth.users.list.tenant`, voir src/xcore_doctype/directory.py), le plugin `iam` gère les accès par les actions `xauth.iam.*` (services/iam.py : xauth
+# juge l'acteur) et `hr` ferme le compte d'un employé qui part (app/hr/src/access.py). Pas de joker : un plugin qui veut lire l'annuaire ou les accès est nommé ici.
+allowed_callers: ["xcore-doctype", "iam", "hr", "xflow", "xlicense"]  # xflow : re-résout l'identité d'un travail différé (xauth.user.permissions) ; xlicense : juge qui peut voir/gérer la licence d'une organisation (xauth.tenant_access)
+
 # ── Application ───────────────────────────────────────────────────────────────
 app:
   name: "XAuth"
-  base_url: "${XAUTH_APP_BASE_URL}"
+  base_url: "http://localhost:8000"  # liens d'invitation et redirections OAuth : à régler sur l'adresse publique de votre hôte
+  # desk_url: "http://localhost:8000/app/xcore-doctype/desk/"  # pages web des liens d'e-mail (invitation, réinitialisation) ; défaut : base_url + le préfixe `/app` de ce dépôt. Surchargeable par XAUTH_DESK_URL.
 
 # ── Seed — tenant et compte admin créés au démarrage ─────────────────────────
 # Toutes les valeurs sont overridables via les variables d'environnement
 # correspondantes (ADMIN_EMAIL, ADMIN_PASSWORD, etc.)
+# ADMIN_EMAIL et ADMIN_PASSWORD n'ont AUCUNE valeur par défaut ici : le démarrage échoue sans eux (jamais de mot de passe commité). `make env` les
+# écrit dans `.env` (mot de passe aléatoire) ; en production, ce sont des secrets de l'hôte.
 seed:
-  admin_email: "contact@xcorehub.dev"
-  # Jamais de mot de passe en dur ici — doit être fourni via la variable
-  # d'environnement ADMIN_PASSWORD (voir env: ci-dessous). Vide ici =
-  # build_seed_cfg() (services/seed.py) échoue explicitement au démarrage
-  # si ADMIN_PASSWORD n'est pas défini, plutôt que de seeder un compte
-  # admin avec un mot de passe public connu (trouvé en clair ici jusqu'à
-  # ce commit, et toujours présent dans l'historique git).
-  admin_password: ""
   admin_tenant_slug: "default"
   admin_tenant_name: "Default"
   admin_role_name: "admin"
@@ -41,12 +41,6 @@ jwt:
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 # Limites par route — format: "/chemin": [max_requetes, fenetre_secondes]
 # Mettre enabled: false pour désactiver en développement.
-# Modules PAYANTS (services/licensing.py) : les droits d'un de ces espaces de noms (`caisse:*`…) ne vont qu'aux membres d'une
-# organisation ABONNÉE (routes /licenses, écrites par license:manage). Vide = aucun module payant, rien n'est filtré.
-# Surchargeable par la variable XAUTH_PAID_MODULES (« caisse,paie »).
-licensing:
-  paid_modules: []
-
 rate_limit:
   enabled: true
   routes: {}
@@ -56,55 +50,19 @@ rate_limit:
 # Les valeurs des sections app/seed/jwt ci-dessus prennent le dessus si la
 # variable d'env est absente ou vide.
 
-envconfiguration:
-  inject: true
-  env_file: .env
 
+# Variables d'environnement de l'hôte lues par xauth. xcore n'accepte que la forme exacte `${VAR}` et REFUSE le plugin si la variable n'existe pas : on ne
+# liste donc ici que ce qui est toujours défini (`make env` écrit `.env` ; `app.dotenv: ./.env` d'`integration.yaml` le charge, et un déploiement exporte
+# ses secrets). ADMIN_EMAIL et ADMIN_PASSWORD sont des SECRETS : jamais de valeur en clair ici, seulement l'indirection vers l'environnement.
+# Pour activer une fonction optionnelle, ajoutez sa ligne ET exportez la variable :
+#   ADMIN_USERNAME   (nom d'utilisateur de l'administrateur ; sans lui, il est dérivé de son adresse : admin@acme.test -> admin)
+#   ADMIN_TENANT_SLUG / ADMIN_TENANT_NAME / ADMIN_ROLE_NAME / USER_ROLE_NAME   (valeurs par défaut : section `seed:`)
+#   JWT_PRIVATE_KEY_PATH / JWT_PUBLIC_KEY_PATH / JWT_ACCESS_EXPIRE_MINUTES / JWT_REFRESH_EXPIRE_DAYS   (défauts : section `jwt:`)
+#   OAUTH_GOOGLE_CLIENT_ID, OAUTH_GOOGLE_CLIENT_SECRET (idem GITHUB, DISCORD, MICROSOFT), OAUTH_TOKEN_KEY (clé Fernet), OAUTH_WEB_REDIRECT_ORIGINS
 env:
-  # Overrides admin seed (optionnels — la section seed: est la source par défaut)
-  ADMIN_EMAIL: "${ADMIN_EMAIL}"
-  ADMIN_PASSWORD: "${ADMIN_PASSWORD}"
-  ADMIN_TENANT_SLUG: "${ADMIN_TENANT_SLUG}"
-  ADMIN_TENANT_NAME: "${ADMIN_TENANT_NAME}"
-  ADMIN_ROLE_NAME: "${ADMIN_ROLE_NAME}"
-  USER_ROLE_NAME: "${USER_ROLE_NAME}"
+  ADMIN_EMAIL: ${ADMIN_EMAIL}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD}
 
-  # Overrides JWT (optionnels — la section jwt: est la source par défaut)
-  JWT_PRIVATE_KEY_PATH: "${XAUTH_JWT_PRIVATE_KEY_PATH}"
-  JWT_PUBLIC_KEY_PATH: "${XAUTH_JWT_PUBLIC_KEY_PATH}"
-  JWT_ACCESS_EXPIRE_MINUTES: "${XAUTH_JWT_ACCESS_EXPIRE_MINUTES}"
-  JWT_REFRESH_EXPIRE_DAYS: "${XAUTH_JWT_REFRESH_EXPIRE_DAYS}"
-
-  # App URL (optionnel — la section app: est la source par défaut)
-
-  APP_NAME: "${XAUTH_APP_NAME}"
-
-  # OAuth providers — secrets, toujours via env
-  OAUTH_GOOGLE_CLIENT_ID: "${XAUTH_OAUTH_GOOGLE_CLIENT_ID}"
-  OAUTH_GOOGLE_CLIENT_SECRET: "${XAUTH_OAUTH_GOOGLE_CLIENT_SECRET}"
-  
-  OAUTH_GITHUB_CLIENT_ID: "${XAUTH_OAUTH_GITHUB_CLIENT_ID}"
-  OAUTH_GITHUB_CLIENT_SECRET: "${XAUTH_OAUTH_GITHUB_CLIENT_SECRET}"
-  
-  OAUTH_DISCORD_CLIENT_ID: "${XAUTH_OAUTH_DISCORD_CLIENT_ID}"
-  OAUTH_DISCORD_CLIENT_SECRET: "${XAUTH_OAUTH_DISCORD_CLIENT_SECRET}"
-  
-  OAUTH_MICROSOFT_CLIENT_ID: "${XAUTH_OAUTH_MICROSOFT_CLIENT_ID}"
-  OAUTH_MICROSOFT_CLIENT_SECRET: "${XAUTH_OAUTH_MICROSOFT_CLIENT_SECRET}"
-  # Clé Fernet (32 octets base64) chiffrant au repos les access/refresh
-  # tokens Gmail/Calendar stockés sur OAuthAccount — générer avec
-  # `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
-  # Sans cette clé, le login OAuth fonctionne normalement mais aucun jeton
-  # Google (Gmail/Calendar) n'est stocké.
-  OAUTH_TOKEN_KEY: "${XAUTH_OAUTH_TOKEN_KEY}"
-  # Origines https autorisées comme cible finale du callback OAuth pour un
-  # frontend web (liste séparée par des virgules, ex.
-  # "https://app.orchestra.io,https://staging.orchestra.io"). Vide par
-  # défaut : seul le deep-link desktop erp:// fonctionne tant qu'aucune
-  # origine web n'est déclarée ici — voir routes/oauth.py, utils/deeplink.py.
-  OAUTH_WEB_REDIRECT_ORIGINS: "${XAUTH_OAUTH_WEB_REDIRECT_ORIGINS}"
-
-# ── Événements émis ──────────────────────────────────────────────────────────
 events_emitted:
   xauth.auth.registered:
     description: "Utilisateur inscrit avec succès"
@@ -202,8 +160,6 @@ permissions:
   - resource: "xauth.*"
     actions: ["*"]
     effect: allow
-  - resource: network
-    description: "Échange de jetons OAuth (Google/GitHub/Discord/Microsoft) via httpx"
 
 # ── Ressources ────────────────────────────────────────────────────────────────
 resources:

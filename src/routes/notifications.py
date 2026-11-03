@@ -9,6 +9,8 @@ from xcore.kernel.api import AuthPayload, get_current_user
 
 from ..models.notification import Notification
 from ..repositories.notification import NotificationRepository
+from ..repositories.user import TenantMemberRepository
+from ._scope import require_tenant_admin
 
 
 class NotificationOut(BaseModel):
@@ -68,8 +70,20 @@ def notifications_router(db: Any) -> APIRouter:
     ) -> Any:
         if body.link and body.link.startswith("javascript:"):
             raise HTTPException(status_code=400, detail="Invalid link")
-        target_user_id = body.user_id or user["sub"]
         tenant_id = (user.get("user") or {}).get("tenant_id")
+        # Écrire dans la cloche de QUELQU'UN D'AUTRE est une opération d'administration : sans ce contrôle, tout
+        # membre identifié déposait un message au titre libre chez n'importe quel compte, par son UUID. Les plugins
+        # du moteur ne passent pas par ici (IPC `xauth.notify`, qui vérifie déjà l'appartenance à l'organisation).
+        # Provisoire : les notifications doivent sortir d'xauth pour devenir un plugin à elles.
+        target_user_id = body.user_id or user["sub"]
+        if target_user_id != user["sub"]:
+            if not tenant_id:
+                raise HTTPException(status_code=403, detail="Aucune organisation courante")
+            async with db.session() as session:
+                await require_tenant_admin(session, user, tenant_id)
+                if await TenantMemberRepository(session).get_membership(target_user_id, tenant_id) is None:
+                    # « Introuvable » : un UUID ne doit pas révéler qu'un compte existe hors de l'organisation.
+                    raise HTTPException(status_code=404, detail="User not found")
         async with db.session() as session:
             repo = NotificationRepository(session)
             n = Notification(

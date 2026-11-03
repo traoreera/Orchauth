@@ -51,7 +51,7 @@ class MemberRoleService:
         from .roles import RoleService
 
         role_svc = RoleService(self._session, self._cache)
-        await role_svc._get_owned_role(tenant_id, role_id)
+        await role_svc._get_assignable_role(tenant_id, role_id)  # ses rôles, plus le `tenant_admin` global (délégation)
 
         member_repo = TenantMemberRepository(self._session)
         if await member_repo.get_membership(user_id, tenant_id) is None:

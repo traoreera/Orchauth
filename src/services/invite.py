@@ -103,13 +103,15 @@ class InviteService:
         repo = InviteRepository(self._session)
         return await repo.list_for_email(email)
 
-    async def revoke_invite(self, invite_id: str, requester_id: str, is_platform_admin: bool = False) -> Invite:
+    async def revoke_invite(self, invite_id: str, requester_id: str, privileged: bool = False) -> Invite:
+        """`privileged` : l'appelant peut révoquer l'invitation d'un AUTRE — admin plateforme, ou administrateur de
+        l'organisation visée (la route le juge : une invitation appartient à son organisation, pas à son auteur).
+        """
         repo = InviteRepository(self._session)
         invite = await repo.get(invite_id)
         if invite is None:
             raise ValueError("Invite not found")
-        # Seul l'inviteur ou un admin plateforme peut révoquer
-        if not is_platform_admin and invite.invited_by != requester_id:
+        if not privileged and invite.invited_by != requester_id:
             raise PermissionError("Not allowed to revoke this invite")
         invite.is_active = False
         await self._session.flush()

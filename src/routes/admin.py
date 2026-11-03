@@ -8,13 +8,15 @@ from xcore.kernel.api import AuthPayload
 from xcore.sdk import require_permission
 
 from ..repositories.session import SessionRepository
-from ..repositories.user import UserRepository
+from ..repositories.user import TenantMemberRepository, UserRepository
 from ..services.audit import AuditService
+from ._scope import is_platform_admin, payload_field
 
 
 class UserAdminResponse(BaseModel):
     id: str
     email: str
+    username: Optional[str] = None
     is_active: bool
     mfa_enabled: bool
     created_at: str
@@ -43,6 +45,7 @@ def admin_router(db: Any, cache: Any = None, token_service: Any = None) -> APIRo
                 {
                     "id": u.id,
                     "email": u.email,
+                    "username": u.username,
                     "is_active": u.is_active,
                     "mfa_enabled": u.mfa_enabled,
                     "created_at": u.created_at.isoformat(),
@@ -53,16 +56,29 @@ def admin_router(db: Any, cache: Any = None, token_service: Any = None) -> APIRo
     @router.get("/users/{user_id}", response_model=UserAdminResponse)
     async def get_user(
         user_id: str,
-        _: AuthPayload = Depends(require_permission("user:read")),
+        caller: AuthPayload = Depends(require_permission("user:read")),
     ) -> Any:
+        """Lit un compte. `user:read` est accordé à TOUT utilisateur inscrit (`USER_PERMISSIONS`) et est délégable :
+        il ne peut donc pas être, à lui seul, le droit de lire n'importe quel compte de la plateforme par son UUID.
+        On exige en plus de PARTAGER une organisation avec la cible — ce dont un annuaire a besoin — l'admin
+        plateforme passant partout, et chacun pouvant toujours se lire lui-même.
+        """
         async with db.session() as session:
             repo = UserRepository(session)
             user = await repo.get(user_id)
             if user is None:
                 raise HTTPException(status_code=404, detail="User not found")
+            if not is_platform_admin(caller) and user_id != payload_field(caller, "sub"):
+                member_repo = TenantMemberRepository(session)
+                mine = {m.tenant_id for m in await member_repo.get_memberships_for_user(payload_field(caller, "sub"))}
+                theirs = {m.tenant_id for m in await member_repo.get_memberships_for_user(user_id)}
+                if not (mine & theirs):
+                    # « Introuvable », pas « interdit » : un UUID ne doit pas révéler qu'un compte existe.
+                    raise HTTPException(status_code=404, detail="User not found")
             return {
                 "id": user.id,
                 "email": user.email,
+                "username": user.username,
                 "is_active": user.is_active,
                 "mfa_enabled": user.mfa_enabled,
                 "created_at": user.created_at.isoformat(),
@@ -113,6 +129,7 @@ def admin_router(db: Any, cache: Any = None, token_service: Any = None) -> APIRo
             return {
                 "id": user.id,
                 "email": user.email,
+                "username": user.username,
                 "is_active": user.is_active,
                 "mfa_enabled": user.mfa_enabled,
                 "created_at": user.created_at.isoformat(),

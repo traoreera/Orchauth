@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from ....utils.deeplink import wrap_bridge
+from urllib.parse import urlencode
+
 from ..base import EmailTransport
 
 
@@ -15,10 +16,8 @@ class InviteEmailSender(EmailTransport):
         invited_by: str,
         expires_hours: int = 72,
     ) -> bool:
-        # Emballé dans la page de rebond https : un destinataire sans l'app
-        # installée (le cas le plus fréquent pour une invitation) voit une
-        # page normale plutôt qu'un lien erp:// mort (auth Constat 10).
-        accept_url = wrap_bridge(self.base_url, f"erp://invite?token={invite_token}")
+        # Lien WEB vers la page d'invitation du Desk (`#/invite?token=…`), jamais un deep-link `erp://` : un invité sans application ouvre son navigateur.
+        accept_url = f"{self.desk_url}#/invite?{urlencode({'token': invite_token})}"
         return await self.send(
             to=to,
             subject=f"Vous êtes invité à rejoindre {tenant_name}",

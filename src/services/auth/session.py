@@ -56,7 +56,7 @@ class SessionService:
         new_refresh_hashed = self._token.hash_token(new_refresh_plain)
 
         access_token, jti = self._token.create_access_token(
-            user_id=session.user_id, tenant_id=session.tenant_id
+            user_id=session.user_id, tenant_id=session.tenant_id, email=session.user.email
         )
 
         new_session = Session.build(

@@ -3,7 +3,7 @@ from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from xcore.kernel.api import AuthPayload, get_current_user
-from xcore.sdk import require_permission
+from xcore.sdk import get_logger, require_permission
 
 from ..models.tenant import Tenant
 from ..repositories.tenant import TenantRepository
@@ -17,12 +17,13 @@ from ..schemas.tenant import (
     TenantUpdate,
 )
 
-
 from ..services.events import XAuthEvents
 from ..services.audit import AuditService
 from ..models.user import TenantMember
 from ..repositories.rbac import RoleRepository
-from ._scope import payload_field as _payload_field, require_tenant_scope
+from ._scope import payload_field as _payload_field, require_tenant_admin, require_tenant_scope
+
+logger = get_logger("xauth.routes.tenants")
 
 
 def tenants_router(db: Any, events: XAuthEvents | None = None) -> APIRouter:
@@ -73,11 +74,20 @@ def tenants_router(db: Any, events: XAuthEvents | None = None) -> APIRouter:
             role_repo = RoleRepository(session)
             roles = await role_repo.list_for_tenant(None)
             owner_role = next((r for r in roles if r.name == "tenant_admin"), None)
+            if owner_role is None:
+                # Sans ce rôle, l'organisation naîtrait avec un propriétaire SANS AUCUN droit, et en silence : il ne pourrait
+                # ni inviter, ni gérer ses accès, et personne ne saurait pourquoi. C'est un défaut d'amorçage (seed non jouée,
+                # rôle renommé), pas une faute de l'utilisateur : on refuse, et on le dit.
+                logger.error("tenant_admin role missing — tenant creation refused", slug=body.slug)
+                raise HTTPException(
+                    status_code=503,
+                    detail="Rôle 'tenant_admin' introuvable : l'amorçage d'xauth est incomplet.",
+                )
 
             member = TenantMember(
                 user_id=user_id,
                 tenant_id=tenant.id,
-                role_id=owner_role.id if owner_role else None,
+                role_id=owner_role.id,
                 is_owner=True
             )
             session.add(member)
@@ -228,11 +238,11 @@ def tenants_router(db: Any, events: XAuthEvents | None = None) -> APIRouter:
         user_id: str,
         payload: AuthPayload = Depends(get_current_user),
     ) -> None:
-        """Retire un membre du tenant. Réservé au propriétaire du tenant."""
+        """Retire un membre de l'organisation : gestion des utilisateurs, donc administrateur de CETTE organisation
+        (propriétaire ou rôle `tenant_admin`). Le propriétaire lui-même reste inamovible (contrôle plus bas).
+        """
         async with db.session() as session:
-            await _require_tenant_scope(
-                session, payload, tenant_id, owner_only=True
-            )
+            await require_tenant_admin(session, payload, tenant_id)
             repo = TenantMemberRepository(session)
             target = await repo.get_membership(user_id, tenant_id)
             if target is None:

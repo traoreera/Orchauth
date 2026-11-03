@@ -11,6 +11,7 @@ from ..audit import AuditService
 from ..events import XAuthEvents
 from ..token import TokenService
 from .password import _check_password_policy, get_pwd_context
+from .username import normalize_username
 
 logger = get_logger(__name__)
 
@@ -30,6 +31,7 @@ class RegistrationService:
         self,
         email: str,
         password: str,
+        username: str | None = None,
         min_length: int = 8,
         require_uppercase: bool = True,
         require_digit: bool = True,
@@ -46,8 +48,12 @@ class RegistrationService:
         if existing is not None:
             raise ValueError("Email already registered")
 
+        name = normalize_username(username) if username and username.strip() else None
+        if name is not None and await user_repo.get_by_username(name) is not None:
+            raise ValueError("Ce nom d'utilisateur est déjà pris")
+
         hashed = get_pwd_context().hash(password)
-        user = User(email=email, hashed_password=hashed)
+        user = User(email=email, username=name, hashed_password=hashed)
         await user_repo.save(user)
         logger.info("User registered: %s", email)
 

@@ -72,8 +72,10 @@ class OnboardingService:
         )
         await member_repo.save(membership)
 
+        # `email` comme sur tous les autres chemins qui émettent un jeton (connexion, renouvellement, select-tenant,
+        # verify-mfa) : le Desk affiche l'identité depuis ce claim et retombait sinon sur l'UUID (`lib/token.ts`).
         access_token, jti = self._token.create_access_token(
-            user_id=session.user_id, tenant_id=tenant.id
+            user_id=session.user_id, tenant_id=tenant.id, email=session.user.email
         )
         new_refresh_plain = self._token.create_refresh_token()
         new_refresh_hashed = self._token.hash_token(new_refresh_plain)
@@ -150,8 +152,8 @@ class OnboardingService:
         invite.is_active = False
         await self._session.flush()
 
-        access_token, jti = self._token.create_access_token(
-            user_id=user.id, tenant_id=invite.tenant_id
+        access_token, jti = self._token.create_access_token(  # `email` : même raison qu'à la création ci-dessus
+            user_id=user.id, tenant_id=invite.tenant_id, email=user.email
         )
         new_refresh_plain = self._token.create_refresh_token()
         new_refresh_hashed = self._token.hash_token(new_refresh_plain)

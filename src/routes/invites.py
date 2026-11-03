@@ -9,11 +9,12 @@ from xcore.sdk import require_permission
 from ..services.email import AuthEmailService
 from ..services.events import XAuthEvents
 from ..services.invite import InviteService
+from ..repositories.invite import InviteRepository
 from ..repositories.rbac import RoleRepository
 from ..repositories.user import UserRepository
 from ..repositories.tenant import TenantRepository
 from ..schemas.invite import AcceptInviteRequest, InviteCreate, InviteResponse
-from ._scope import is_platform_admin, require_tenant_scope
+from ._scope import is_platform_admin, require_tenant_admin, require_tenant_scope
 
 
 def invites_router(
@@ -36,7 +37,10 @@ def invites_router(
         user: AuthPayload = Depends(require_permission("invites:write")),
     ) -> Any:
         async with db.session() as session:
-            await require_tenant_scope(session, user, body.tenant_id, owner_only=True)
+            # Inviter est une opération d'ADMINISTRATION de l'organisation, pas un privilège du propriétaire : le rôle
+            # `tenant_admin` (que le propriétaire porte, et qu'il peut donner) l'ouvre. `invites:write` ci-dessus reste
+            # le grant, la portée dit DANS QUELLE organisation.
+            await require_tenant_admin(session, user, body.tenant_id)
 
             if body.role_id and not is_platform_admin(user):
                 role = await RoleRepository(session).get_with_permissions(body.role_id)
@@ -197,14 +201,26 @@ def invites_router(
         invite_id: str,
         user: AuthPayload = Depends(require_permission("invites:write")),
     ) -> None:
-        """Révoque une invitation (l'inviteur ou un admin plateforme uniquement)."""
+        """Révoque une invitation : son auteur, un administrateur de l'organisation visée, ou l'admin plateforme."""
         async with db.session() as session:
             svc = InviteService(session)
+            privileged = is_platform_admin(user)
+            if not privileged:
+                # Une invitation appartient à son organisation : un administrateur de celle-ci peut la retirer, même
+                # s'il ne l'a pas envoyée. On lit l'organisation de l'invitation avant d'en juger.
+                invite = await InviteRepository(session).get(invite_id)
+                if invite is None:
+                    raise HTTPException(status_code=404, detail="Invite not found")
+                try:
+                    await require_tenant_admin(session, user, invite.tenant_id)
+                    privileged = True
+                except HTTPException:
+                    privileged = False  # pas administrateur : seul son auteur peut la retirer
             try:
                 await svc.revoke_invite(
                     invite_id=invite_id,
                     requester_id=user["sub"],
-                    is_platform_admin=is_platform_admin(user),
+                    privileged=privileged,
                 )
                 await session.commit()
             except ValueError as exc:
