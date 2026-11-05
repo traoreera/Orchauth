@@ -151,7 +151,7 @@ class Plugin(IPCCommands, IamCommands, AutoDispatchMixin, TrustedBase):
         self.app.include_router(tenants_router(db, self._events))
         self.app.include_router(rbac_router(db, cache=cache))
         self.app.include_router(mfa_router(db, self._token_service, cache=cache))
-        self.app.include_router(invites_router(db, self._email_service, self._events))
+        self.app.include_router(invites_router(db, self._email_service, self._events, plugin_caller=self.call_plugin))
         self.app.include_router(audit_router(db))
         self.app.include_router(
             oauth_router(
