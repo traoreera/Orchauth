@@ -16,11 +16,18 @@ from ..repositories.tenant import TenantRepository
 from ..schemas.invite import AcceptInviteRequest, InviteCreate, InviteResponse
 from ._scope import is_platform_admin, require_tenant_admin, require_tenant_scope
 
+from xcore.sdk import get_logger
+
+logger = get_logger("xauth.invites")
+
 
 def invites_router(
     db: Any,
     email_service: AuthEmailService,
     events: XAuthEvents | None = None,
+    # Pour demander au moteur de DocTypes où une organisation attend ses gens (`meta.interface`). Absent :
+    # le lien reste le web, comme avant ce réglage.
+    plugin_caller: Any = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/invites", tags=["invites"])
 
@@ -30,6 +37,22 @@ def invites_router(
             return
         payload = {"user_id": user_id, "text": text, "channels": ["notification"], **(extra or {})}
         await events.emit("ext.notification.publish", payload)
+
+    async def _interface_of(tenant_id: str) -> str:
+        """Où cette organisation attend ses gens (`meta.interface` du moteur de DocTypes).
+
+        Jamais bloquant : sans le moteur, ou s'il ne répond pas, on garde le web — le comportement d'avant ce
+        réglage. Une préférence d'affichage ne doit pas empêcher une invitation de partir.
+        """
+        if plugin_caller is None:
+            return "web"
+        try:
+            answer = await plugin_caller("xcore-doctype", "meta.interface", {"tenant": tenant_id})
+        except Exception as exc:  # noqa: BLE001
+            logger.info("interface de %s inconnue (%s) : lien web", tenant_id, exc)
+            return "web"
+        chosen = (answer or {}).get("interface")
+        return chosen if chosen in ("web", "desktop", "both") else "web"
 
     @router.post("/", response_model=InviteResponse, status_code=status.HTTP_201_CREATED)
     async def create_invite(
@@ -43,14 +66,10 @@ def invites_router(
             await require_tenant_admin(session, user, body.tenant_id)
 
             if body.role_id and not is_platform_admin(user):
-                role = await RoleRepository(session).get_with_permissions(body.role_id)
-                if role is None:
-                    raise HTTPException(status_code=400, detail="Rôle invalide")
-                if any(p.name == "admin:*" for p in role.permissions):
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Attribution d'un rôle administrateur plateforme interdite",
-                    )
+                try:
+                    await InviteService(session)._validate_role_for_tenant(body.tenant_id, body.role_id)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
 
             # Charge le tenant AVANT le commit pour avoir le vrai nom
             tenant = await TenantRepository(session).get(body.tenant_id)
@@ -68,13 +87,17 @@ def invites_router(
                 await session.commit()
                 await session.refresh(invite)
 
-                # Email avec le vrai nom du tenant
+                # Email avec le vrai nom du tenant, et le lien que l'organisation attend : web ou application
+                # installée (`System Settings.interface`, demandé au moteur). Inviter quelqu'un dans une
+                # organisation qui travaille sur l'application, puis lui envoyer un lien vers un Desk web, c'est
+                # l'envoyer au mauvais endroit dès le premier geste.
                 await email_service.invite.send_invitation(
                     to=invite.email,
                     invite_token=invite.token,
                     tenant_name=tenant_name,
                     invited_by=user["sub"],
                     expires_hours=body.expires_hours,
+                    interface=await _interface_of(body.tenant_id),
                 )
 
                 # Notifier l'inviteur (confirmation)

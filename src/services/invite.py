@@ -12,14 +12,41 @@ logger = get_logger("xauth.invite")
 from ..models.invite import Invite
 from ..models.user import TenantMember
 from ..repositories.invite import InviteRepository
+from ..repositories.rbac import RoleRepository
 from ..repositories.user import TenantMemberRepository
 from .events import XAuthEvents
+from .seed import TENANT_ADMIN_ROLE
 
 
 class InviteService:
     def __init__(self, session: AsyncSession, events: XAuthEvents | None = None) -> None:
         self._session = session
         self._events = events
+
+    async def _validate_role_for_tenant(self, tenant_id: str, role_id: Optional[str]) -> None:
+        """Un rôle d'invitation doit suivre la même règle que l'assignation standard RBAC.
+
+        - les rôles du tenant ciblé sont autorisés
+        - le rôle global `tenant_admin` est autorisé
+        - tout autre rôle global, et les rôles d'un autre tenant, sont refusés
+        """
+        if role_id is None:
+            return
+
+        role_repo = RoleRepository(self._session)
+        role = await role_repo.get_with_permissions(role_id)
+        if role is None:
+            raise ValueError("Rôle invalide")
+
+        # On applique exactement la même règle que `_get_assignable_role`.
+        if role.tenant_id == tenant_id or (
+            role.tenant_id is None and role.name == TENANT_ADMIN_ROLE
+        ):
+            if any(p.name == "admin:*" for p in (role.permissions or [])):
+                raise ValueError("Rôle administrateur plateforme interdit dans une invitation")
+            return
+
+        raise ValueError("Le rôle n'appartient pas à ce tenant")
 
     async def create_invite(
         self,
@@ -29,6 +56,8 @@ class InviteService:
         role_id: Optional[str] = None,
         expires_hours: int = 72,
     ) -> Invite:
+        await self._validate_role_for_tenant(tenant_id, role_id)
+
         repo = InviteRepository(self._session)
         invite = Invite(
             tenant_id=tenant_id,
@@ -63,6 +92,8 @@ class InviteService:
             expires = expires.replace(tzinfo=timezone.utc)
         if expires < now:
             raise ValueError("Invite has expired")
+
+        await self._validate_role_for_tenant(invite.tenant_id, invite.role_id)
 
         # Create membership
         member_repo = TenantMemberRepository(self._session)
