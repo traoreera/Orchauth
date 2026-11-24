@@ -146,6 +146,27 @@ await ctx.caller("xauth", "log_event", {
 
 ---
 
+## `xauth.iam.member.provision`
+
+Crée le compte d'un futur membre et l'inscrit dans l'organisation, avec un **mot de passe provisoire**. Pour un employeur qui
+ouvre un accès à un salarié sans attendre qu'il réponde à une invitation.
+
+**Charge :** `{ "tenant_id": "...", "actor_id": "...", "email": "...", "role_id": null }`
+
+**Réponse :** `{ "status": "ok", "member": { "user_id": "...", "email": "...", "temporary_password": "...", "must_change_password": true } }`
+
+- `actor_id` doit **administrer** l'organisation (propriétaire, rôle `tenant_admin`, ou administrateur de la plateforme) :
+  xauth le juge, pas le plugin appelant. Sinon `code: forbidden`.
+- Seulement pour une adresse qu'xauth **ne connaît pas**. Un compte qui existe ne reçoit jamais un mot de passe par cette
+  porte (`code: invalid`) : il s'invite (`xauth.create_invite`).
+- Le mot de passe provisoire est rendu **une seule fois**, dans cette réponse. Il n'est ni journalisé ni émis en événement.
+- Le compte naît `must_change_password`. Tant que son titulaire n'a pas choisi son mot de passe, `POST /login` ne rend
+  **aucun jeton** et n'ouvre aucune session : la réponse porte `password_change_required: true` et un
+  `password_change_token` à usage unique (30 min), à présenter à `POST /password/reset` avec le nouveau mot de passe —
+  qui doit différer du provisoire. Il se connecte ensuite normalement.
+
+---
+
 ## Utiliser les dépendances FastAPI de xcore
 
 Pour les routes FastAPI dans un plugin, il est plus simple d'utiliser les dépendances xcore directement plutôt que l'IPC :

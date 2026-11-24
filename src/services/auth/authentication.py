@@ -13,6 +13,7 @@ from ...repositories.tenant import TenantRepository
 from ...repositories.user import TenantMemberRepository, UserRepository
 from ..audit import AuditService
 from ..events import XAuthEvents
+from ..password import PasswordService
 from ..token import TokenService
 from .password import get_pwd_context
 
@@ -70,6 +71,25 @@ class AuthenticationService:
                 )
             logger.warning("Login failed: account inactive for %s (ip=%s)", identifier, ip_address)
             raise ValueError("Account is inactive")
+
+        if user.must_change_password:
+            # Le mot de passe est PROVISOIRE (compte créé pour lui par un administrateur, qui le connaît) : AUCUN jeton, aucune
+            # session. La réponse porte un jeton à usage unique qui ne sert qu'à choisir un mot de passe (`POST /password/reset`),
+            # après quoi il se connecte comme tout le monde. Placé avant tout le reste : aucune des sorties ci-dessous n'y échappe.
+            change_token = await PasswordService(self._session, self._cache, self._events).create_change_token(user)
+            await audit.log_event(action="login.password_change_required", user_id=user.id, ip_address=ip_address)
+            logger.info("Login held: password change required for %s (ip=%s)", user.id, ip_address)
+            return {
+                "access_token": "",
+                "refresh_token": "",
+                "token_type": "bearer",
+                "user_id": user.id,
+                "tenant_id": None,
+                "mfa_required": False,
+                "password_change_required": True,
+                "password_change_token": change_token,
+                "tenants": None,
+            }
 
         member_repo = TenantMemberRepository(self._session)
 

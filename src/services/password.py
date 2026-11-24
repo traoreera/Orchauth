@@ -47,6 +47,16 @@ class PasswordService:
         logger.info("Password reset token created for %s", email)
         return token
 
+    async def create_change_token(self, user: Any) -> str:
+        """Le jeton du PREMIER changement (mot de passe provisoire) : le même que celui d'un « mot de passe oublié » — même
+        cache, même durée, même usage unique par `reset_password` —, mais remis à qui vient de PROUVER le mot de passe
+        provisoire, pas envoyé par courriel. Sans cache il n'y a nulle part où le tenir : la connexion est refusée."""
+        if self._cache is None:
+            raise ValueError("Changement de mot de passe indisponible")
+        token = secrets.token_urlsafe(48)
+        await self._cache.set(f"{_RESET_KEY_PREFIX}{token}", user.id, ttl=_RESET_TTL)
+        return token
+
     async def reset_password(
         self,
         *,
@@ -68,8 +78,12 @@ class PasswordService:
         user = await repo.get(user_id)
         if user is None or not user.is_active:
             raise ValueError("Utilisateur introuvable ou inactif.")
+        if user.must_change_password and user.hashed_password and get_pwd_context().verify(new_password, user.hashed_password):
+            # « Changer » pour le même : le mot de passe provisoire, connu de qui a créé le compte, resterait le sien.
+            raise ValueError("Choisissez un mot de passe différent du mot de passe provisoire.")
 
         user.hashed_password = get_pwd_context().hash(new_password)
+        user.must_change_password = False  # il a choisi le sien : le provisoire n'existe plus
         await self._session.flush()
 
         await self._cache.delete(key)
@@ -109,6 +123,7 @@ class PasswordService:
             raise ValueError("Le nouveau mot de passe doit être différent de l'actuel.")
 
         user.hashed_password = get_pwd_context().hash(new_password)
+        user.must_change_password = False  # il a choisi le sien : le provisoire n'existe plus
         await self._session.flush()
         if self._events:
             await self._events.password_changed(user_id=user_id)
@@ -137,6 +152,7 @@ class PasswordService:
 
         _check_password_policy(new_password, min_length, require_uppercase, require_digit)
         user.hashed_password = get_pwd_context().hash(new_password)
+        user.must_change_password = False  # il a choisi le sien : le provisoire n'existe plus
         await self._session.flush()
         if self._events:
             await self._events.password_set(user_id=user_id)

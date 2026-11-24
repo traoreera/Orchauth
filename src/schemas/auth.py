@@ -70,6 +70,9 @@ class TokenResponse(BaseModel):
     mfa_required: bool = False
     mfa_token: Optional[str] = None        # challenge JWT court (5 min) si mfa_required=true
     onboarding_required: bool = False
+    # Mot de passe provisoire : aucun jeton n'est rendu ; `password_change_token` sert une fois à `POST /password/reset`.
+    password_change_required: bool = False
+    password_change_token: Optional[str] = None
     tenants: Optional[list[TenantInfo]] = None
 
 
