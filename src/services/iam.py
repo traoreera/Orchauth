@@ -12,12 +12,15 @@ code stable.
 
 from __future__ import annotations
 
+import re
+import secrets
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.rbac import Permission, Role
+from ..models.user import TenantMember, User
 from ..repositories.rbac import (
     MemberPermissionRepository,
     MemberRoleRepository,
@@ -26,6 +29,7 @@ from ..repositories.rbac import (
 )
 from ..repositories.user import TenantMemberRepository, UserRepository
 from .audit import AuditService
+from .auth.password import get_pwd_context
 from .rbac.members import MemberRoleService
 from .rbac.permissions import PermissionService
 from .rbac.roles import RoleService
@@ -79,6 +83,27 @@ def role_dict(r: Role) -> dict[str, Any]:
         "scope": "platform" if r.tenant_id is None else "organisation",
         "permissions": sorted(p.name for p in r.permissions),
     }
+
+
+_EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s.]{2,}$")
+_UPPER, _LOWER, _DIGIT = "ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnopqrstuvwxyz", "23456789"  # sans I/l/O/0/1 : il se dicte
+
+
+def _clean_email(value: Any) -> str:
+    address = value.strip().lower() if isinstance(value, str) else ""
+    if len(address) > 255 or not _EMAIL.match(address):
+        raise IamInvalid("Adresse e-mail invalide")
+    return address
+
+
+def temporary_password(length: int = 14) -> str:
+    """Un mot de passe provisoire tiré au sort (`secrets`) : au moins une majuscule, une minuscule et un chiffre — il passe la
+    politique de mot de passe quels que soient ses réglages courants —, sans caractères qui se confondent à l'œil."""
+    alphabet = _UPPER + _LOWER + _DIGIT
+    chars = [secrets.choice(_UPPER), secrets.choice(_LOWER), secrets.choice(_DIGIT)]
+    chars += [secrets.choice(alphabet) for _ in range(max(length, 12) - len(chars))]
+    secrets.SystemRandom().shuffle(chars)
+    return "".join(chars)
 
 
 def _clean_text(value: Any, what: str, limit: int, *, required: bool) -> Optional[str]:
@@ -356,6 +381,38 @@ class IamService:
             )
         await self._s.flush()
         return await self._member_dict(tenant_id, await self._membership(tenant_id, user_id))
+
+    async def member_provision(self, tenant_id: str, actor_id: str, email: Any, role_id: Any = None) -> dict[str, Any]:
+        """Crée le compte de quelqu'un et l'inscrit dans l'organisation, avec un MOT DE PASSE PROVISOIRE rendu une seule fois.
+
+        Pour l'employeur qui ouvre un accès à un salarié sans attendre qu'il réponde à une invitation. Ce que cette porte tient :
+
+        - réservée à qui ADMINISTRE l'organisation (`_require_manage`), jugé ici, jamais par le plugin appelant ;
+        - seulement pour une adresse qu'xauth ne connaît PAS : un compte qui existe ne reçoit jamais un mot de passe par ici
+          (ce serait donner à un administrateur le compte d'un autre, dans toutes ses organisations) — celui-là s'INVITE ;
+        - le mot de passe est tiré ici, rendu dans cette réponse et nulle part ailleurs (ni journal, ni audit, ni événement) ;
+        - le compte naît `must_change_password` : la connexion ne rend aucun jeton tant que son titulaire n'a pas choisi le
+          sien (`AuthenticationService.login`), si bien que le mot de passe provisoire n'ouvre jamais une session.
+        """
+        who = await self._require_manage(tenant_id, actor_id)
+        address = _clean_email(email)
+        users = UserRepository(self._s)
+        if await users.get_by_email(address) is not None:
+            raise IamInvalid("Un compte existe déjà pour cette adresse : invitez-le dans l'organisation")
+        role = role_id if isinstance(role_id, str) and role_id else None
+        if role is not None:
+            from .invite import InviteService
+
+            await InviteService(self._s)._validate_role_for_tenant(tenant_id, role)  # la règle des invitations, la même
+        password = temporary_password()
+        user = User(email=address, hashed_password=get_pwd_context().hash(password), must_change_password=True)
+        await users.save(user)
+        await TenantMemberRepository(self._s).save(TenantMember(user_id=user.id, tenant_id=tenant_id, role_id=role))
+        await AuditService(self._s).log_event(
+            action="tenant.member_provisioned", tenant_id=tenant_id, user_id=who.actor_id, resource="tenant_member", resource_id=user.id
+        )
+        await self._s.flush()
+        return {"user_id": user.id, "email": user.email, "temporary_password": password, "must_change_password": True}
 
     async def member_remove(self, tenant_id: str, actor_id: str, user_id: str) -> None:
         who = await self._require_manage(tenant_id, actor_id)

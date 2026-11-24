@@ -12,6 +12,8 @@ from sqlalchemy.engine import Connection
 # (table, colonne, type SQL, index unique éventuel)
 ADDED_COLUMNS: list[tuple[str, str, str, str | None]] = [
     ("xauth_users", "username", "VARCHAR(64)", "ux_xauth_users_username"),
+    # Sans défaut en base : NULL vaut « rien à changer » (les comptes existants), le modèle pose False sur les nouveaux.
+    ("xauth_users", "must_change_password", "BOOLEAN", None),
 ]
 
 

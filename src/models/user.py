@@ -30,6 +30,9 @@ class User(Base):
     # Nullable — les users OAuth n'ont pas forcément de mot de passe
     hashed_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Un compte créé POUR quelqu'un (mot de passe provisoire, connu de qui l'a créé) : la connexion ne rend aucun jeton tant
+    # que son titulaire n'a pas choisi le sien (`AuthenticationService.login`). Nullable : les comptes d'avant n'ont rien.
+    must_change_password: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     mfa_secret: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     mfa_backup_codes: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
