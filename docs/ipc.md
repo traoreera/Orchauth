@@ -151,7 +151,11 @@ await ctx.caller("xauth", "log_event", {
 Crée le compte d'un futur membre et l'inscrit dans l'organisation, avec un **mot de passe provisoire**. Pour un employeur qui
 ouvre un accès à un salarié sans attendre qu'il réponde à une invitation.
 
-**Charge :** `{ "tenant_id": "...", "actor_id": "...", "email": "...", "role_id": null }`
+**Charge :** `{ "tenant_id": "...", "actor_id": "...", "email": "...", "role_id": null, "password": null }`
+
+`password` (facultatif) : un mot de passe provisoire FOURNI par l'appelant — un hôte qui le dérive de son service de clés —,
+de 12 à 128 caractères, avec une majuscule et un chiffre. Absent, xauth le tire lui-même. Dans les deux cas il est rendu dans
+la réponse et le compte doit en changer avant toute session.
 
 **Réponse :** `{ "status": "ok", "member": { "user_id": "...", "email": "...", "temporary_password": "...", "must_change_password": true } }`
 

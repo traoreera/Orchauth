@@ -85,7 +85,7 @@ class IamCommands:
     async def _iam_member_provision(self, payload):
         """Crée le compte d'un futur membre avec un mot de passe PROVISOIRE (rendu ici, une fois) : voir `IamService.member_provision`."""
         return await self._iam(
-            payload, lambda s, p: _wrap("member", s.member_provision(*self._who(p), p.get("email"), p.get("role_id"))), name="member.provision"
+            payload, lambda s, p: _wrap("member", s.member_provision(*self._who(p), p.get("email"), p.get("role_id"), p.get("password"))), name="member.provision"
         )
 
     @action("xauth.iam.member.remove")

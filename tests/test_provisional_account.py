@@ -155,3 +155,17 @@ async def test_an_ordinary_account_logs_in_as_before(org, tokens):
 
 def test_an_existing_database_gains_the_column():
     assert ("xauth_users", "must_change_password", "BOOLEAN", None) in ADDED_COLUMNS
+
+
+async def test_the_caller_may_supply_the_temporary_password(org, tokens):
+    """Un hôte qui dérive le mot de passe de son service de clés le FOURNIT : il est pris tel quel, rendu, et reste provisoire —
+    aucune session tant qu'il n'est pas changé. Un mot de passe faible ou trop court est refusé, rien n'est créé."""
+    made = await IamService(org).member_provision("t1", "owner", "fatou@exemple.ci", None, "Derive-Par-Hote-42")
+    assert made["temporary_password"] == "Derive-Par-Hote-42" and made["must_change_password"] is True
+    out = await AuthenticationService(org, tokens, Events(), cache=Cache()).login("fatou@exemple.ci", "Derive-Par-Hote-42")
+    assert out["access_token"] == "" and out["password_change_required"] is True
+
+    for weak in ("court1A", "toutenminuscules123", "SANSCHIFFRESDUTOUT", 12345678901234, ""):
+        with pytest.raises(IamInvalid):
+            await IamService(org).member_provision("t1", "owner", "autre@exemple.ci", None, weak)
+    assert "autre@exemple.ci" not in {m["email"] for m in await IamService(org).members("t1", "owner")}

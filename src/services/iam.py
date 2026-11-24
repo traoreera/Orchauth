@@ -29,7 +29,7 @@ from ..repositories.rbac import (
 )
 from ..repositories.user import TenantMemberRepository, UserRepository
 from .audit import AuditService
-from .auth.password import get_pwd_context
+from .auth.password import _check_password_policy, get_pwd_context
 from .rbac.members import MemberRoleService
 from .rbac.permissions import PermissionService
 from .rbac.roles import RoleService
@@ -104,6 +104,16 @@ def temporary_password(length: int = 14) -> str:
     chars += [secrets.choice(alphabet) for _ in range(max(length, 12) - len(chars))]
     secrets.SystemRandom().shuffle(chars)
     return "".join(chars)
+
+
+def _provisional(value: Any) -> str:
+    if not isinstance(value, str) or len(value) < 12 or len(value) > 128:
+        raise IamInvalid("Mot de passe provisoire invalide (12 à 128 caractères)")
+    try:
+        _check_password_policy(value)
+    except ValueError as e:
+        raise IamInvalid("Mot de passe provisoire trop faible : une majuscule et un chiffre au moins") from e
+    return value
 
 
 def _clean_text(value: Any, what: str, limit: int, *, required: bool) -> Optional[str]:
@@ -382,7 +392,7 @@ class IamService:
         await self._s.flush()
         return await self._member_dict(tenant_id, await self._membership(tenant_id, user_id))
 
-    async def member_provision(self, tenant_id: str, actor_id: str, email: Any, role_id: Any = None) -> dict[str, Any]:
+    async def member_provision(self, tenant_id: str, actor_id: str, email: Any, role_id: Any = None, password: Any = None) -> dict[str, Any]:
         """Crée le compte de quelqu'un et l'inscrit dans l'organisation, avec un MOT DE PASSE PROVISOIRE rendu une seule fois.
 
         Pour l'employeur qui ouvre un accès à un salarié sans attendre qu'il réponde à une invitation. Ce que cette porte tient :
@@ -404,7 +414,10 @@ class IamService:
             from .invite import InviteService
 
             await InviteService(self._s)._validate_role_for_tenant(tenant_id, role)  # la règle des invitations, la même
-        password = temporary_password()
+        # Le mot de passe provisoire : tiré ici, ou FOURNI par l'appelant (un hôte qui le dérive de son service de clés, par
+        # organisation). Fourni, il suit la politique et fait au moins 12 caractères ; dans les deux cas le compte naît
+        # `must_change_password`, si bien que ce mot de passe n'ouvre jamais une session.
+        password = _provisional(password) if password is not None else temporary_password()
         user = User(email=address, hashed_password=get_pwd_context().hash(password), must_change_password=True)
         await users.save(user)
         await TenantMemberRepository(self._s).save(TenantMember(user_id=user.id, tenant_id=tenant_id, role_id=role))
