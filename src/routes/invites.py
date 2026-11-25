@@ -166,6 +166,10 @@ def invites_router(
         body: AcceptInviteRequest,
         user: AuthPayload = Depends(get_current_user),
     ) -> Any:
+        if body.user_id and body.user_id != user["sub"]:
+            # On ne rejoint une organisation que pour SOI : un `user_id` étranger dans le corps n'est jamais suivi, et le dire
+            # vaut mieux que de l'ignorer en silence.
+            raise HTTPException(status_code=403, detail="Une invitation s'accepte pour le compte connecté, pas pour un autre")
         async with db.session() as session:
             svc = InviteService(session)
             try:
